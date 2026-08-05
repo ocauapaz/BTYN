@@ -3,3 +3,15 @@
 *.rbxm
 *.rbxmx
 *.lock
+
+# Generated output from the example schema
+examples/out/
+
+# VS Code extension dev dependencies
+editors/vscode/node_modules/
+editors/vscode/*.vsix
+
+# Jekyll build output
+docs/_site/
+docs/.jekyll-cache/
+.jekyll-metadata

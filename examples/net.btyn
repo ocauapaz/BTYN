@@ -1,0 +1,91 @@
+-- Example BTYN schema.
+--
+-- Compile with:
+--     lune run cli/main -- examples/net.btyn
+--
+-- Inspect sizes without writing anything:
+--     lune run cli/main -- examples/net.btyn --check
+
+config {
+	server  = "examples/out/Server/Net.luau"
+	client  = "examples/out/Client/Net.luau"
+	runtime = "game:GetService(\"ReplicatedStorage\"):WaitForChild(\"BTYN\")"
+}
+
+struct Vec2i {
+	x: i16,
+	y: i16,
+}
+
+enum Team {
+	Red,
+	Blue,
+	Spectator,
+}
+
+-- Client asks to swing. The server decides whether it landed: the schema
+-- guarantees the shape of the request, never its legitimacy.
+event Attack from client rate 10 {
+	target: entity,
+	combo:  u8,
+	heavy:  bool,
+}
+
+-- Server tells everyone what actually happened.
+event Damaged from server {
+	victim:   entity,
+	attacker: entity,
+	amount:   u16,
+	critical: bool,
+	killed:   bool,
+}
+
+-- Cosmetic, high frequency, and nobody notices a lost one: unreliable.
+-- The compiler has checked this fits the payload cap.
+unreliable Muzzle from server {
+	at:  vec3,
+	dir: unit,
+}
+
+-- Aim updates many times a second. Quantised angles cost two bytes each
+-- instead of the eight a pair of f32s would.
+unreliable Aim from client {
+	yaw:   angle,
+	pitch: angle,
+}
+
+event Chat from client rate 2 {
+	text: string(200),
+}
+
+event Announce from server {
+	text: string(200),
+	team: Team,
+	at:   Vec2i,
+}
+
+-- Request/reply over the same two remotes. No RemoteFunction, so a slow
+-- handler never blocks replication behind it.
+request Buy from client rate 4 {
+	item:     u16,
+	quantity: u8(1..99),
+} -> {
+	ok:      bool,
+	balance: u32,
+	reason:  string(64),
+}
+
+-- Replicated state. Only changed fields go out, and only to the players in
+-- the audience. `high` priority means it is never deferred under load —
+-- a player cannot fight without knowing who is hurt.
+channel Health priority high {
+	hp:     u8(0..100),
+	armor:  u8,
+	downed: bool,
+}
+
+-- Cosmetic state; the first thing to defer when a client is over budget.
+channel Nameplate priority low {
+	label: string(24),
+	team:  Team,
+}
