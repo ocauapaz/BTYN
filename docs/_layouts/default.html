@@ -6,7 +6,7 @@
 <title>{% if page.title %}{{ page.title }} · {% endif %}{{ site.title }}</title>
 <meta name="description" content="{{ page.description | default: site.description }}">
 <link rel="icon" href="{{ site.baseurl }}/assets/logo.svg">
-<link rel="stylesheet" href="{{ site.baseurl }}/assets/style.css">
+<link rel="stylesheet" href="{{ site.baseurl }}/assets/style.css?v={{ site.time | date: '%s' }}">
 </head>
 <body>
 
@@ -51,7 +51,7 @@
   <p>MIT · <a href="https://github.com/ocauapaz/BTYN">github.com/ocauapaz/BTYN</a></p>
 </footer>
 
-<script src="{{ site.baseurl }}/assets/highlight.js"></script>
+<script src="{{ site.baseurl }}/assets/highlight.js?v={{ site.time | date: '%s' }}"></script>
 
 </body>
 </html>

@@ -15,6 +15,7 @@
 	--kw-str: #1a7f4b;
 	--kw-num: #a54d1e;
 	--kw-lit: #0550ae;
+	--kw-type: #0f7c86;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -27,7 +28,10 @@
 		--accent: #a898ff;
 		--accent-soft: #211d38;
 		--yellow: #fff046;
-		--purple: #a898ff;
+		/* Distinct from --accent on purpose. They were briefly the same value,
+		   which collapsed keywords, types and modifiers into one colour and
+		   made highlighted code read as barely highlighted at all. */
+		--purple: #c9a2ff;
 
 		/* Function names take the logo yellow here — it is the one place the
 		   brand colour is legible as text. */
@@ -35,6 +39,7 @@
 		--kw-str: #7ddba6;
 		--kw-num: #f0a878;
 		--kw-lit: #79c0ff;
+		--kw-type: #6bd6d0;
 	}
 }
 
@@ -204,7 +209,7 @@ pre code { background: none; padding: 0; }
 .hl .t   { color: var(--fg); font-weight: 600; }      /* declared type name */
 .hl .m   { color: var(--purple); }                    /* modifier */
 .hl .v   { color: var(--kw-lit); }                    /* literal: client, nil, true */
-.hl .ty  { color: var(--accent); }                    /* type reference */
+.hl .ty  { color: var(--kw-type); }                   /* type reference */
 .hl .f   { color: var(--fg); }                        /* field name */
 .hl .fn  { color: var(--kw-fn); }                     /* function name */
 .hl .ns  { color: var(--fg); }                        /* namespace before a call */
