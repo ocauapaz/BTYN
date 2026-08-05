@@ -237,10 +237,22 @@ type Modifiers = {
 local function parseModifiers(state: State): Modifiers
 	local mods: Modifiers = {}
 
+	local function rejectDuplicate(token: Token, existing: any)
+		if existing ~= nil then
+			state.reporter:fatal({
+				message = `duplicate '{token.text}' modifier`,
+				span = token.span,
+				label = "already given",
+				help = "each modifier may appear once per declaration",
+			})
+		end
+	end
+
 	while peek(state).kind == "ident" do
 		local token = peek(state)
 
 		if token.text == "from" then
+			rejectDuplicate(token, mods.from)
 			advance(state)
 			local dir = expectIdent(state, "'client' or 'server'")
 			if dir.text ~= "client" and dir.text ~= "server" then
@@ -253,10 +265,23 @@ local function parseModifiers(state: State): Modifiers
 			end
 			mods.from = dir.text :: Ast.Direction
 		elseif token.text == "rate" then
+			rejectDuplicate(token, mods.rate)
 			advance(state)
-			local value = expectNumber(state, "after 'rate'")
+			local value, valueSpan = expectNumber(state, "after 'rate'")
+			-- A bucket refilling at zero or below hands out its initial burst and
+			-- then blocks the packet forever, which reads as "the event stopped
+			-- working" rather than as the limit it is.
+			if value <= 0 then
+				state.reporter:fatal({
+					message = `rate must be greater than zero, got {value}`,
+					span = valueSpan,
+					label = "not a usable rate",
+					help = "`rate 10` allows ten of these per second per player; drop the modifier to leave the packet unlimited",
+				})
+			end
 			mods.rate = value
 		elseif token.text == "priority" then
+			rejectDuplicate(token, mods.priority)
 			advance(state)
 			local level = expectIdent(state, "a priority level")
 			if not PRIORITIES[level.text] then
@@ -329,9 +354,11 @@ local function parseConfig(state: State, keyword: Token): Ast.ConfigDecl
 		if valueToken.kind == "string" then
 			advance(state)
 			value = valueToken.text
-		elseif valueToken.kind == "number" then
-			advance(state)
-			value = valueToken.number :: number
+		elseif valueToken.kind == "number" or isPunct(valueToken, "-") then
+			-- Signed, so `budget = -1` reaches the config validator as the number
+			-- it is and gets an error about the value rather than about the
+			-- minus sign being an unexpected token.
+			value = (expectNumber(state, `for config key '{key.text}'`))
 		elseif isIdent(valueToken, "true") or isIdent(valueToken, "false") then
 			advance(state)
 			value = valueToken.text == "true"
@@ -394,7 +421,7 @@ end
 ]]
 function Parser.parse(tokens: { Token }, reporter: ReporterImpl): Ast.File
 	local state: State = { tokens = tokens, pos = 1, reporter = reporter }
-	local decls: { Decl } = {} :: { Ast.Decl }
+	local decls: { Ast.Decl } = {}
 
 	while peek(state).kind ~= "eof" do
 		local keyword = peek(state)
@@ -476,6 +503,18 @@ function Parser.parse(tokens: { Token }, reporter: ReporterImpl): Ast.File
 					message = "channels do not take a direction",
 					span = name.span,
 					help = "channels always replicate server to client — the server owns authoritative state",
+				})
+			end
+
+			-- Accepting this and dropping it on the floor is worse than refusing
+			-- it: the schema would read as rate limited and the generated code
+			-- would not be.
+			if mods.rate ~= nil then
+				reporter:fatal({
+					message = "channels do not take a rate",
+					span = name.span,
+					label = "not valid on a channel",
+					help = "a channel already sends at most once a frame per player; use `priority` to decide what gets deferred when a client is over budget",
 				})
 			end
 

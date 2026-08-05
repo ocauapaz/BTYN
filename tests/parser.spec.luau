@@ -239,4 +239,18 @@ t.test("priority is rejected on events", function()
 	end, "not valid on events")
 end)
 
+t.test("duplicate modifiers are rejected rather than last-wins", function()
+	t.raises(function()
+		parse("event A from client from server { a: u8 }")
+	end, "duplicate 'from'")
+
+	t.raises(function()
+		parse("event A from client rate 10 rate 20 { a: u8 }")
+	end, "duplicate 'rate'")
+
+	t.raises(function()
+		parse("channel C priority low priority high { a: u8 }")
+	end, "duplicate 'priority'")
+end)
+
 return true

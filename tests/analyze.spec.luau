@@ -356,10 +356,78 @@ t.test("arrays of bool are rejected with a workaround", function()
 	end, "arrays of `bool` are not supported")
 end)
 
+t.test("arrays of optional fixed types are rejected with a workaround", function()
+	-- The presence bit of an optional fixed type lives in the container's
+	-- bitfield, which an array element does not have. This used to crash the
+	-- emitter with an internal error instead of diagnosing.
+	t.raises(function()
+		analyze("event E from client { slots: [u16?; 4] }")
+	end, "arrays cannot hold optionals")
+
+	t.raises(function()
+		analyze("event E from client { flags: [bool?; 4] }")
+	end, "arrays cannot hold optionals")
+end)
+
+t.test("a channel field cannot be an optional of a fixed type", function()
+	-- A channel delta has no bitfield for the presence bit. Also a former
+	-- internal crash.
+	t.raises(function()
+		analyze("channel Health { armor: u16? }")
+	end, "optional of a fixed-size type")
+
+	t.raises(function()
+		analyze("channel Health { downed: bool? }")
+	end, "optional of a fixed-size type")
+end)
+
+t.test("a channel field may be an optional of a dynamic type", function()
+	-- Dynamic optionals spend a presence byte instead and stay expressible.
+	local schema = analyze("channel Board { title: string(8)? }")
+	t.eq(packet(schema, "Board").kind, "channel")
+end)
+
 t.test("an empty event is allowed", function()
 	local schema = analyze("event Ping from client { }")
 	t.eq(packet(schema, "Ping").body.size, 0)
 	t.eq(packet(schema, "Ping").body.fixed, true)
+end)
+
+t.test("a rate of zero or less is rejected", function()
+	-- The bucket would hand out its burst once and then refuse forever, which
+	-- reads as "the event stopped working" rather than as a limit.
+	t.raises(function()
+		analyze("event E from client rate 0 { a: u8 }")
+	end, "rate must be greater than zero")
+
+	t.raises(function()
+		analyze("event E from client rate -5 { a: u8 }")
+	end, "rate must be greater than zero")
+end)
+
+t.test("a rate on a channel is rejected rather than ignored", function()
+	t.raises(function()
+		analyze("channel Health rate 10 { hp: u8 }")
+	end, "channels do not take a rate")
+end)
+
+t.test("non-positive numeric config is rejected", function()
+	local function withConfig(entry: string)
+		local file, reporter = Parser.parseSource("net.btyn", `config \{ server = "s" client = "c" {entry} }`)
+		return Analyze.run(file, reporter)
+	end
+
+	t.raises(function()
+		withConfig("unreliable_cap = 0")
+	end, "must be greater than zero")
+
+	t.raises(function()
+		withConfig("budget = -1")
+	end, "must be greater than zero")
+
+	t.raises(function()
+		withConfig("request_timeout = 0")
+	end, "must be greater than zero")
 end)
 
 return true

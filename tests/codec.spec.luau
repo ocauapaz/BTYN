@@ -329,6 +329,26 @@ t.test("a bitfield that is not a whole word survives a round trip", function()
 	property("event Odd from client { " .. table.concat(fields, " ") .. " }")
 end)
 
+t.test("a bool? whose two bits land in different stores survives a round trip", function()
+	-- 15 bools put the optional's presence bit at 15 and its value bit at 16 —
+	-- either side of the boundary between the u16 store and the u8 one. The
+	-- value bit used to be folded into the presence bit's store, where the
+	-- narrower write silently discarded it, and every such optional decoded as
+	-- false. The same straddle happens at bit 31 of any 4-byte store.
+	local function straddle(leading: number)
+		local fields = {}
+		for index = 1, leading do
+			table.insert(fields, `f{index}: bool,`)
+		end
+		table.insert(fields, "flag: bool?,")
+		property("event Straddle from client { " .. table.concat(fields, " ") .. " }", 40)
+	end
+
+	straddle(15)
+	straddle(31)
+	straddle(47)
+end)
+
 t.test("strings survive a round trip", function()
 	property("event Text from client { id: u8, name: string(40), tag: string(300) }")
 end)
@@ -520,6 +540,69 @@ t.test("an infinite float is rejected on read", function()
 	t.raises(function()
 		codecs.read.F(b, 0, 16, {})
 	end, "not a finite number")
+end)
+
+t.test("a NaN inside a vec3 is rejected on read", function()
+	-- The scalar float check never covered vec3 or cframe, so the one type
+	-- most likely to feed physics was the one type that could carry NaN
+	-- straight through.
+	local codecs = build("event Move from client { at: vec3 }")
+	local b = buffer.create(16)
+	buffer.writef32(b, 0, 1)
+	buffer.writef32(b, 4, 0 / 0)
+	buffer.writef32(b, 8, 3)
+
+	t.raises(function()
+		codecs.read.Move(b, 0, 16, {})
+	end, "not a finite vector")
+end)
+
+t.test("an infinity inside a cframe position is rejected on read", function()
+	local codecs = build("event Place from client { at: cframe }")
+	local b = buffer.create(24)
+	buffer.writef32(b, 0, math.huge)
+
+	t.raises(function()
+		codecs.read.Place(b, 0, 24, {})
+	end, "position is not finite")
+end)
+
+t.test("a unit vector is normalised on read", function()
+	-- Each component decodes into [-1.00003, 1], so three at full scale make a
+	-- vector of magnitude 1.73. A caller trusting the name for a hitscan
+	-- direction would get 73% more reach than it asked for.
+	local codecs = build("event Aim from client { dir: unit }")
+	local b = buffer.create(8)
+	for offset = 0, 4, 2 do
+		buffer.writei16(b, offset, 32767)
+	end
+
+	local decoded = codecs.read.Aim(b, 0, 8, {})
+	local magnitude = math.sqrt(decoded.dir.X ^ 2 + decoded.dir.Y ^ 2 + decoded.dir.Z ^ 2)
+	approx(magnitude, 1, 1e-5, "decoded magnitude")
+end)
+
+t.test("a zero unit vector is rejected on read", function()
+	-- Not a direction, and normalising it would hand back NaN.
+	local codecs = build("event Aim from client { dir: unit }")
+	local b = buffer.create(8)
+
+	t.raises(function()
+		codecs.read.Aim(b, 0, 8, {})
+	end, "not a direction")
+end)
+
+t.test("a ref that is not an Instance is rejected on read", function()
+	-- The refs array is the second argument of the remote call and is entirely
+	-- sender-controlled: nothing stops a client putting a string where the
+	-- schema says Instance.
+	local codecs = build("event Show from client { thing: Instance }")
+	local b = buffer.create(8)
+	buffer.writeu16(b, 0, 1)
+
+	t.raises(function()
+		codecs.read.Show(b, 0, 8, { "not an instance" })
+	end, "not an Instance")
 end)
 
 t.test("an over-cap array count is rejected", function()

@@ -40,6 +40,12 @@ local PRIORITY_ORDER: { [string]: number } = {
 	low = 1,
 }
 
+--[[
+	The three per-player maps are weak-keyed, for the same reason RateLimiter's
+	are: a handle can outlive a session, and a player who leaves would otherwise
+	stay in `known` forever — costing a removal packet aimed at nobody every
+	time an entity dropped them, and growing without bound over a long uptime.
+]]
 export type Handle = {
 	id: number,
 	state: { [string]: any },
@@ -51,8 +57,19 @@ export type Handle = {
 	-- bits owed to a specific player because their update was deferred when
 	-- they were over budget; merged into the next update they do receive
 	carry: { [Player]: number },
-	alive: boolean,
 }
+
+local WEAK_KEYS = { __mode = "k" }
+
+local function weakSet(players: { Player }?): { [Player]: boolean }
+	local result: { [Player]: boolean } = setmetatable({}, WEAK_KEYS) :: any
+	if players then
+		for _, player in players do
+			result[player] = true
+		end
+	end
+	return result
+end
 
 export type Set = {
 	endpoint: Endpoint,
@@ -65,6 +82,11 @@ export type Set = {
 	fullMask: number,
 	write: (buffer, number, { [string]: any }, number, { Instance }) -> number,
 	handles: { [number]: Handle },
+	-- Destroyed handles waiting to have their removal packet sent. They leave
+	-- `handles` at destroy time rather than at flush time, so re-creating the
+	-- same id later in the frame gets a fresh, live handle instead of the
+	-- corpse of the old one.
+	removed: { Handle },
 }
 
 export type Config = {
@@ -95,6 +117,7 @@ function Channel.new(config: Config): Set
 		fullMask = 2 ^ #config.fields - 1,
 		write = config.write,
 		handles = {},
+		removed = {},
 	}
 end
 
@@ -111,10 +134,10 @@ function Channel.of(set: Set, id: number): Handle
 		id = id,
 		state = {},
 		mask = 0,
-		audience = {},
-		known = {},
-		carry = {},
-		alive = true,
+		audience = weakSet(),
+		known = weakSet(),
+		-- Holds bit masks rather than flags, but wants the same weak keys.
+		carry = setmetatable({}, WEAK_KEYS) :: any,
 	}
 	set.handles[id] = handle
 	return handle
@@ -136,7 +159,11 @@ function Channel.set(set: Set, handle: Handle, values: { [string]: any })
 		if bit == nil then
 			error(`btyn: '{name}' is not a field of this channel`, 0)
 		end
-		if state[name] == value then
+		-- Tables — struct and array fields — compare by reference, so a caller
+		-- mutating the same table in place would never dirty the field. Treat
+		-- every table as changed; scalars and Roblox value types compare by
+		-- value and keep the cheap skip.
+		if state[name] == value and type(value) ~= "table" then
 			continue
 		end
 		state[name] = value
@@ -153,20 +180,25 @@ end
 	keyframe on the next flush.
 ]]
 function Channel.audience(handle: Handle, players: { Player })
-	local next_: { [Player]: boolean } = {}
-	for _, player in players do
-		next_[player] = true
-	end
-	handle.audience = next_
+	handle.audience = weakSet(players)
 end
 
 --[[
-	Marks the entity gone. The next flush tells everyone holding it to drop it,
-	then forgets the handle.
+	Marks the entity gone.
+
+	The handle leaves the set immediately and moves to the removal queue, so a
+	caller that destroys an id and re-creates it in the same frame gets a live
+	handle back rather than the one already on its way out. The queued removal
+	still goes out first, ahead of the new keyframe.
 ]]
-function Channel.destroy(handle: Handle)
-	handle.alive = false
-	handle.audience = {}
+function Channel.destroy(set: Set, handle: Handle)
+	if set.handles[handle.id] ~= handle then
+		return
+	end
+
+	set.handles[handle.id] = nil
+	handle.audience = weakSet()
+	table.insert(set.removed, handle)
 end
 
 --[[
@@ -216,23 +248,25 @@ end
 function Channel.flushAll(sets: { Set }, budgetPerFrame: number)
 	local spent: { [Player]: number } = {}
 
-	local ordered = table.clone(sets)
-	table.sort(ordered, function(a, b)
+	-- Sorted in place: the caller hands over the same array every frame and
+	-- always wants the same order, so there is nothing worth preserving — and
+	-- after the first frame this is a no-op over an already-sorted array.
+	table.sort(sets, function(a, b)
 		return a.priority > b.priority
 	end)
 
-	for _, set in ordered do
-		for id, handle in set.handles do
-			-- Tell everyone still holding it to drop a destroyed entity, then
-			-- forget it entirely.
-			if not handle.alive then
-				for player in handle.known do
-					pushRemove(set, player, id)
-				end
-				set.handles[id] = nil
-				continue
+	for _, set in sets do
+		-- Removals go out before this set's updates, so an id destroyed and
+		-- re-created in the same frame reaches the client as drop-then-keyframe
+		-- rather than the other way round.
+		for _, handle in set.removed do
+			for player in handle.known do
+				pushRemove(set, player, handle.id)
 			end
+		end
+		table.clear(set.removed)
 
+		for id, handle in set.handles do
 			for player in handle.known do
 				if not handle.audience[player] then
 					pushRemove(set, player, id)

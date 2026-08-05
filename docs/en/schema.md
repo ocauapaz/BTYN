@@ -107,6 +107,10 @@ deltas coalesce with the next update, so nothing is lost — only delayed.
 Capped at 32 fields, which keeps the mask a single load. Splitting is better
 design anyway: fields that change at different rates want different priorities.
 
+A channel takes no `rate` and no `from`. It already sends at most once a frame
+per player, and it always replicates server to client; both are rejected at
+compile time rather than accepted and ignored.
+
 ### `struct` and `enum`
 
 ```btyn
@@ -135,6 +139,7 @@ config {
 | `runtime` | `game:GetService("ReplicatedStorage"):WaitForChild("BTYN")` | Luau expression the generated files use to reach the runtime |
 | `budget` | `40000` | Soft per-client outbound budget, bytes/second |
 | `unreliable_cap` | `800` | Largest unreliable payload, bytes |
+| `max_packets_per_batch` | `256` | Most packets one received batch may carry, server-side |
 | `request_timeout` | `10` | Seconds before an unanswered request fails |
 | `write_checks` | `true` | Validate on the way out as well as in |
 | `manual` | `false` | Flush by hand instead of on Heartbeat |
@@ -192,6 +197,12 @@ Optional. When `T` is fixed-size this costs **one bit** and keeps the packet on
 the constant-offset fast path — the payload bytes are always written, zeroed
 when absent. When `T` is dynamic it costs a presence byte instead.
 
+That presence bit lives in the packet's (or struct's) bitfield, which array
+elements and channel fields do not have — so an optional of a *fixed* type is
+rejected in those two places. Wrap it in a struct, which carries its own
+bitfield: `struct Slot { value: u16? }`. Optionals of dynamic types spend a
+presence byte and work anywhere.
+
 ### Roblox values
 
 | Type | Bytes | Notes |
@@ -199,7 +210,7 @@ when absent. When `T` is dynamic it costs a presence byte instead.
 | `vec3` | 12 | 3 × `f32` |
 | `cframe` | 18 | position as 3 × `f32`, rotation as quantised euler angles |
 | `color3` | 3 | one byte per channel |
-| `unit` | 6 | unit vector, each component quantised to `i16` |
+| `unit` | 6 | unit vector, each component quantised to `i16`; normalised on read |
 | `angle` | 2 | radians quantised across `[-pi, pi]` |
 | `Instance` | 2 | index into a sidecar array — see below |
 

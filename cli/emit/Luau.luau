@@ -88,6 +88,7 @@ local function emitEndpoint(w: Impl, schema: Analyze.Schema)
 	w:line(`unreliableCap = {schema.config.unreliableCap},`)
 	w:line(`budget = {schema.config.budget},`)
 	w:line(`manual = {tostring(schema.config.manual)},`)
+	w:line(`maxPacketsPerBatch = {schema.config.maxPacketsPerBatch},`)
 	w:pop("})")
 	w:line()
 end
@@ -136,36 +137,54 @@ local function emitStage(w: Impl, schema: Analyze.Schema, name: string, opcode: 
 end
 
 --[[
+	Emits the drop-and-report branch for an over-limit sender.
+]]
+local function emitRateCheck(w: Impl, name: string, rate: number?, returnExpr: string)
+	w:push(`if not RateLimiter.allow(rate{name}, player) then`)
+	w:push("if endpoint.onAbuse then")
+	w:line(`endpoint.onAbuse(player, "btyn: {name} exceeded its rate limit of {rate}/s")`)
+	w:pop("end")
+	w:line(`return {returnExpr}`)
+	w:pop("end")
+end
+
+--[[
 	Emits the inbound handler registration for one packet.
 
-	A rate-limited packet is still decoded before being dropped: the batch is a
-	byte stream, so skipping a packet requires knowing how long it is. The
-	saving is in not running game logic, and in the abuse report.
+	A rate-limited dynamic packet is still decoded before being dropped: the
+	batch is a byte stream, so skipping a packet requires knowing how long it
+	is. A fixed packet's size is a compile-time constant, so it is refused
+	before paying for the decode at all.
+
+	The handler runs on its own thread. The batch walk sits inside one pcall,
+	so a handler that throws would otherwise abort the rest of the batch and be
+	reported as the sender's abuse; and one that yields would stall every
+	packet behind it.
 ]]
-local function emitHandler(w: Impl, name: string, opcode: number, side: Side, rateLimited: boolean, rate: number?)
+local function emitHandler(w: Impl, name: string, opcode: number, side: Side, rateLimited: boolean, rate: number?, body: Analyze.Body, reliable: boolean)
 	w:line(`local handler{name}: any = nil`)
 	w:push(`Transport.setHandler(endpoint, {opcode}, function(player, b, o, limit, refs)`)
+
+	if rateLimited and body.fixed then
+		emitRateCheck(w, name, rate, tostring(body.size))
+	end
+
 	w:line(`local value, size = read{name}(b, o, limit, refs)`)
 
-	if rateLimited then
-		w:push(`if not RateLimiter.allow(rate{name}, player) then`)
-		w:push("if endpoint.onAbuse then")
-		w:line(`endpoint.onAbuse(player, "btyn: {name} exceeded its rate limit of {rate}/s")`)
-		w:pop("end")
-		w:line("return size")
-		w:pop("end")
+	if rateLimited and not body.fixed then
+		emitRateCheck(w, name, rate, "size")
 	end
 
 	w:push(`if handler{name} then`)
 	if side == "server" then
-		w:line(`handler{name}(player, value)`)
+		w:line(`task.spawn(handler{name}, player, value)`)
 	else
-		w:line(`handler{name}(value)`)
+		w:line(`task.spawn(handler{name}, value)`)
 	end
 	w:pop("end")
 
 	w:line("return size")
-	w:pop("end)")
+	w:pop(`end, {tostring(reliable)})`)
 	w:line()
 end
 
@@ -263,15 +282,17 @@ local function emitRequest(w: Impl, schema: Analyze.Schema, packet: Analyze.Pack
 		w:push("if o + 3 > limit then")
 		w:line(`error("btyn: truncated reply for {name}", 0)`)
 		w:pop("end")
+		-- `player` is who sent this reply, and is passed on so the registry can
+		-- refuse one that did not come from the peer the request went to.
 		w:line("local id = buffer.readu16(b, o)")
 		w:push("if buffer.readu8(b, o + 2) == 0 then")
-		w:line(`Request.resolve(requests, id, false, "btyn: {name} was rejected by the responder")`)
+		w:line(`Request.resolve(requests, id, false, "btyn: {name} was rejected by the responder", player)`)
 		w:line("return 3")
 		w:pop("end")
 		w:line(`local value, size = read{name}Reply(b, o + 3, limit, refs)`)
-		w:line("Request.resolve(requests, id, true, value)")
+		w:line("Request.resolve(requests, id, true, value, player)")
 		w:line("return 3 + size")
-		w:pop("end)")
+		w:pop("end, true)")
 		w:line()
 
 		local target = if side == "server" then "player" else "false"
@@ -292,10 +313,13 @@ local function emitRequest(w: Impl, schema: Analyze.Schema, packet: Analyze.Pack
 		w:line()
 
 		local args = if side == "server" then "player, v" else "v"
+		-- Who the request is going to. Only a reply from this peer resolves
+		-- it; on the client the only possible peer is the server.
+		local peer = if side == "server" then "player" else "nil"
 
 		w:push(`Net.{name} = \{`)
 		w:push(`call = function({params}): {name}Reply`)
-		w:line(`local ok, result = Request.await(requests, send{name}({args}))`)
+		w:line(`local ok, result = Request.await(requests, send{name}({args}), {peer})`)
 		w:push("if not ok then")
 		w:line("error(result, 2)")
 		w:pop("end")
@@ -304,7 +328,7 @@ local function emitRequest(w: Impl, schema: Analyze.Schema, packet: Analyze.Pack
 		-- The non-throwing form: a timeout is an ordinary outcome for anything
 		-- crossing a network, not an exceptional one.
 		w:push(`try = function({params}): (boolean, any)`)
-		w:line(`return Request.await(requests, send{name}({args}))`)
+		w:line(`return Request.await(requests, send{name}({args}), {peer})`)
 		w:pop("end,")
 		w:pop("}")
 		w:line()
@@ -321,12 +345,7 @@ local function emitRequest(w: Impl, schema: Analyze.Schema, packet: Analyze.Pack
 	w:line(`local value, size = read{name}(b, o + 2, limit, refs)`)
 
 	if packet.rate and side == "server" then
-		w:push(`if not RateLimiter.allow(rate{name}, player) then`)
-		w:push("if endpoint.onAbuse then")
-		w:line(`endpoint.onAbuse(player, "btyn: {name} exceeded its rate limit of {packet.rate}/s")`)
-		w:pop("end")
-		w:line("return 2 + size")
-		w:pop("end")
+		emitRateCheck(w, name, packet.rate, "2 + size")
 	end
 
 	local target = if side == "server" then "player" else "false"
@@ -353,7 +372,7 @@ local function emitRequest(w: Impl, schema: Analyze.Schema, packet: Analyze.Pack
 	w:pop("end)")
 
 	w:line("return 2 + size")
-	w:pop("end)")
+	w:pop("end, true)")
 	w:line()
 
 	local handlerSignature = if side == "server"
@@ -406,7 +425,7 @@ local function emitChannel(w: Impl, schema: Analyze.Schema, packet: Analyze.Pack
 		w:push("local wrapper = {")
 		w:line(`set = function(values: {name}Partial) Channel.set(set{name}, handle, values) end,`)
 		w:line(`audience = function(players: \{ Player }) Channel.audience(handle, players) end,`)
-		w:line(`destroy = function() Channel.destroy(handle) handles{name}[id] = nil end,`)
+		w:line(`destroy = function() Channel.destroy(set{name}, handle) handles{name}[id] = nil end,`)
 		w:pop("}")
 		w:line(`handles{name}[id] = wrapper`)
 		w:line("return wrapper")
@@ -437,11 +456,13 @@ local function emitChannel(w: Impl, schema: Analyze.Schema, packet: Analyze.Pack
 	w:push("for key, value in delta do")
 	w:line("state[key] = value")
 	w:pop("end")
+	-- Spawned for the same reason event handlers are: a throwing or yielding
+	-- callback must not abort the rest of the batch walk.
 	w:push(`if handler{name} then`)
-	w:line(`handler{name}(id, state, delta)`)
+	w:line(`task.spawn(handler{name}, id, state, delta)`)
 	w:pop("end")
 	w:line("return 4 + size")
-	w:pop("end)")
+	w:pop("end, true)")
 	w:line()
 
 	w:push(`Transport.setHandler(endpoint, {removeOpcode}, function(player, b, o, limit, refs)`)
@@ -451,10 +472,10 @@ local function emitChannel(w: Impl, schema: Analyze.Schema, packet: Analyze.Pack
 	w:line("local id = buffer.readu32(b, o)")
 	w:line(`store{name}[id] = nil`)
 	w:push(`if remove{name} then`)
-	w:line(`remove{name}(id)`)
+	w:line(`task.spawn(remove{name}, id)`)
 	w:pop("end")
 	w:line("return 4")
-	w:pop("end)")
+	w:pop("end, true)")
 	w:line()
 
 	w:push(`Net.{name} = \{`)
@@ -466,35 +487,18 @@ local function emitChannel(w: Impl, schema: Analyze.Schema, packet: Analyze.Pack
 end
 
 --[[
-	Emits one side's module.
+	Emits the codec functions one packet needs on this side.
+
+	A channel only ever moves as a delta, so its whole-record codec is never
+	emitted; a request gets a second pair for the reply, which travels the
+	opposite way to the request itself.
 ]]
-local function emitSide(schema: Analyze.Schema, side: Side): string
-	local w = Writer.new()
-	local options: Codec.Options = { writeChecks = schema.config.writeChecks, readChecks = true }
-
-	emitHeader(w, schema, side)
-
-	-- Types, enums and structs go out whole on both sides: they are small, and
-	-- splitting them would make the two files harder to read side by side.
-	local shared = Writer.new()
-	Module.emitShared(shared, schema, options)
-	w:concat(shared)
-
-	-- Codecs, filtered to what this side uses.
-	for _, codec in Module.codecs(schema) do
-		local packet = codec.packet
+local function emitPacketCodecs(w: Impl, packet: Analyze.Packet, side: Side, options: Codec.Options)
+	for _, codec in Module.packetCodecs(packet) do
 		local isReply = codec.suffix == "Reply"
 		local writes = if isReply then writesReply(packet, side) else writesBody(packet, side)
 
-		Module.emitTypeAlias(w, codec.typeName, codec.body.fields)
-		w:line()
-
 		if packet.kind == "channel" then
-			-- Channels move as deltas, so the whole-record codec is never used.
-			-- A partial type lets `set` accept just the fields that changed.
-			Module.emitPartialAlias(w, `{codec.typeName}Partial`, codec.body.fields)
-			w:line()
-
 			if writes then
 				w:push(
 					`local function write{codec.typeName}Delta(b: buffer, o: number, v: any, mask: number, refs: \{ Instance }): number`
@@ -527,6 +531,36 @@ local function emitSide(schema: Analyze.Schema, side: Side): string
 		end
 		w:line()
 	end
+end
+
+--[[
+	Emits one side's module.
+]]
+local function emitSide(schema: Analyze.Schema, side: Side): string
+	local w = Writer.new()
+	local options: Codec.Options = { writeChecks = schema.config.writeChecks, readChecks = true }
+
+	emitHeader(w, schema, side)
+
+	-- Types, enums and structs go out whole on both sides: they are small, and
+	-- splitting them would make the two files harder to read side by side.
+	local shared = Writer.new()
+	Module.emitShared(shared, schema, options)
+	w:concat(shared)
+
+	-- Type aliases stay at module scope. `export type` is only legal there, and
+	-- everything below this point lives inside a block.
+	for _, codec in Module.codecs(schema) do
+		Module.emitTypeAlias(w, codec.typeName, codec.body.fields)
+		w:line()
+
+		if codec.packet.kind == "channel" then
+			-- A channel moves as a delta, so `set` and the client handler both
+			-- deal in "just the fields that changed".
+			Module.emitPartialAlias(w, `{codec.typeName}Partial`, codec.body.fields)
+			w:line()
+		end
+	end
 
 	emitEndpoint(w, schema)
 
@@ -550,58 +584,82 @@ local function emitSide(schema: Analyze.Schema, side: Side): string
 		w:line()
 	end
 
-	-- Inbound rate limiters, one bucket per packet per player.
-	for _, packet in schema.packets do
-		if packet.rate and packet.kind ~= "channel" and packet.from ~= side and side == "server" then
-			w:line(`local rate{packet.name} = RateLimiter.new({packet.rate})`)
-		end
-	end
-	w:line()
-
 	w:line("local Net = {}")
 	w:line()
 
+	--[[
+		One block per packet: its codecs, its rate bucket, its transport glue and
+		its public entry.
+
+		Luau allows 200 locals per function, and a module body is a function. At
+		module scope a schema of eighty-odd packets stops compiling outright —
+		"out of local registers" from the generated file, which is a miserable
+		thing to debug. A block frees its registers again at `end`, so the
+		ceiling becomes one packet's worth rather than the whole schema's.
+	]]
 	for _, packet in schema.packets do
-		if packet.kind ~= "event" then
-			continue
+		w:push("do")
+
+		emitPacketCodecs(w, packet, side, options)
+
+		-- Inbound rate limiting is the receiver's job, and only the server has
+		-- an untrusted peer to limit.
+		local rateLimited = packet.rate ~= nil and packet.kind ~= "channel" and packet.from ~= side and side == "server"
+		if rateLimited then
+			w:line(`local rate{packet.name} = RateLimiter.new({packet.rate})`)
+			w:line()
 		end
 
-		if writesBody(packet, side) then
-			emitPush(w, schema, packet.name, packet.opcode, packet.body, packet.reliable)
-			if side == "server" and not packet.body.usesRefs then
-				emitStage(w, schema, packet.name, packet.opcode, packet.body)
+		if packet.kind == "event" then
+			if writesBody(packet, side) then
+				emitPush(w, schema, packet.name, packet.opcode, packet.body, packet.reliable)
+				if side == "server" and not packet.body.usesRefs then
+					emitStage(w, schema, packet.name, packet.opcode, packet.body)
+				end
+			else
+				emitHandler(w, packet.name, packet.opcode, side, rateLimited, packet.rate, packet.body, packet.reliable)
 			end
-		else
-			emitHandler(w, packet.name, packet.opcode, side, packet.rate ~= nil and side == "server", packet.rate)
-		end
-	end
-
-	for _, packet in schema.packets do
-		if packet.kind ~= "event" then
-			continue
-		end
-		emitEventApi(w, packet, side, packet.body.usesRefs)
-	end
-
-	for _, packet in schema.packets do
-		if packet.kind == "request" then
+			emitEventApi(w, packet, side, packet.body.usesRefs)
+		elseif packet.kind == "request" then
 			emitRequest(w, schema, packet, side)
-		elseif packet.kind == "channel" then
+		else
 			emitChannel(w, schema, packet, side)
 		end
+
+		w:pop("end")
+		w:line()
 	end
 
 	-- Channels write their deltas into the batches this same flush sends, and
-	-- timed-out requests are reaped on the same tick.
+	-- timed-out requests are reaped on the same tick. The channel allowance
+	-- scales with real elapsed time rather than assuming sixty flushes a
+	-- second, so a `manual` flush cadence still spends `budget` bytes per
+	-- second; the clamp keeps a long hitch from dumping a multi-second
+	-- allowance into a single frame.
 	if hasRequests or hasChannels then
+		if hasChannels then
+			w:line("local lastFlush = os.clock()")
+		end
 		w:push("endpoint.beforeFlush = function()")
 		if hasRequests then
 			w:line("Request.sweep(requests)")
 		end
 		if hasChannels then
-			w:line(`Channel.flushAll(channelSets, {math.max(math.floor(schema.config.budget / 60), 1)})`)
+			w:line("local now = os.clock()")
+			w:line(`local allowance = math.max(math.floor({schema.config.budget} * math.min(now - lastFlush, 0.25)), 1)`)
+			w:line("lastFlush = now")
+			w:line("Channel.flushAll(channelSets, allowance)")
 		end
 		w:pop("end")
+		w:line()
+	end
+
+	-- With `manual` set nothing guarantees a regular flush, so timed-out
+	-- requests are reaped on their own clock rather than waiting for one.
+	if hasRequests and schema.config.manual then
+		w:push('game:GetService("RunService").Heartbeat:Connect(function()')
+		w:line("Request.sweep(requests)")
+		w:pop("end)")
 		w:line()
 	end
 

@@ -382,6 +382,17 @@ function resolveType(ref: Ast.TypeRef, symbols: Symbols): Resolved
 			})
 		end
 
+		-- An optional of a fixed type keeps its presence in the container's
+		-- bitfield, and an array element has no bitfield to spend a bit in.
+		if element.kind == "optional" and element.fixed then
+			reporter:fatal({
+				message = "arrays cannot hold optionals of fixed-size types",
+				span = ref.span,
+				label = "unsupported element type",
+				help = "wrap the optional in a struct — `struct Slot { value: u16? }` — which carries its own presence bit, or use a sentinel value",
+			})
+		end
+
 		local lenBytes = lengthBytes(cap)
 		return {
 			kind = "array",

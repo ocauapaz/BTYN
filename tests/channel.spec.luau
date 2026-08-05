@@ -188,6 +188,16 @@ t.test("channels are flushed before the batch goes out", function()
 	local server = generate("channel Health { hp: u8 }")
 	t.ok(string.find(server, "endpoint.beforeFlush", 1, true), "should use the pre-flush hook")
 	t.ok(string.find(server, "Channel.flushAll", 1, true), "should flush channel sets")
+	-- The allowance scales with elapsed time instead of assuming sixty flushes
+	-- a second, so a manual flush cadence still spends the configured budget.
+	t.ok(string.find(server, "os.clock()", 1, true), "budget should follow real elapsed time")
+end)
+
+t.test("client channel callbacks run on their own thread", function()
+	-- Same isolation as event handlers: the batch walk sits inside one pcall.
+	local client = select(2, generate("channel Health { hp: u8 }"))
+	t.ok(string.find(client, "task.spawn(handlerHealth, id, state, delta)", 1, true), "update callback should be spawned")
+	t.ok(string.find(client, "task.spawn(removeHealth, id)", 1, true), "remove callback should be spawned")
 end)
 
 t.test("a channel over 32 fields is rejected", function()
@@ -235,6 +245,35 @@ end)
 
 t.test("timed out requests are swept", function()
 	local client = select(2, generate("request Buy from client { item: u16 } -> { ok: bool }"))
+	t.ok(string.find(client, "Request.sweep", 1, true), "should sweep the registry")
+end)
+
+t.test("a reply is resolved against the peer it was sent to", function()
+	-- Without the peer, any player could answer a request the server sent to
+	-- somebody else — ids are sequential, so it needs no guessing at all.
+	local server = generate("request Probe from server { nonce: u32 } -> { answer: u32 }")
+
+	t.ok(string.find(server, "Request.resolve(requests, id, true, value, player)", 1, true), "should pass the sender")
+	t.ok(string.find(server, "Request.await(requests, sendProbe(player, v), player)", 1, true), "should record the target")
+end)
+
+t.test("a client request records the server as its peer", function()
+	local client = select(2, generate("request Buy from client { item: u16 } -> { ok: bool }"))
+	t.ok(string.find(client, "Request.await(requests, sendBuy(v), nil)", 1, true), "the peer should be nil")
+end)
+
+t.test("manual mode still sweeps timed-out requests", function()
+	-- With `manual` set nothing guarantees a regular flush, so a caller that
+	-- never flushes must not strand its timed-out threads forever.
+	local file, reporter = Parser.parseSource(
+		"net.btyn",
+		[[
+		config { server = "s.luau" client = "c.luau" manual = true }
+		request Buy from client { item: u16 } -> { ok: bool }
+	]]
+	)
+	local client = Luau.emitClient(Analyze.run(file, reporter))
+	t.ok(string.find(client, "Heartbeat:Connect", 1, true), "should reap on its own clock")
 	t.ok(string.find(client, "Request.sweep", 1, true), "should sweep the registry")
 end)
 

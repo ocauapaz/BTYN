@@ -94,6 +94,24 @@ t.test("a schema using every supported type compiles", function()
 	assertCompiles(client, "client")
 end)
 
+t.test("a large schema still compiles", function()
+	-- Luau allows 200 locals per function and a module body is one, so emitting
+	-- every packet's codecs and glue at module scope put a hard ceiling at
+	-- roughly eighty packets — past which the generated file failed to load with
+	-- "out of local registers". Each packet gets its own block instead.
+	local parts = {}
+	for index = 1, 40 do
+		table.insert(parts, `event Up{index} from client \{ a: u8, b: f32 }`)
+		table.insert(parts, `event Down{index} from server \{ a: u8, b: f32 }`)
+		table.insert(parts, `channel State{index} \{ hp: u8, downed: bool }`)
+		table.insert(parts, `request Ask{index} from client \{ q: u16 } -> \{ ok: bool }`)
+	end
+
+	local server, client = generate(table.concat(parts, "\n"))
+	assertCompiles(server, "server")
+	assertCompiles(client, "client")
+end)
+
 t.suite("Emit — API direction")
 
 t.test("a client-to-server event gives the client fire and the server on", function()
@@ -116,6 +134,97 @@ t.test("a server-to-client event gives the server the broadcast forms", function
 
 	t.ok(string.find(client, "on = function", 1, true), "client should expose on")
 	t.ok(not string.find(client, "fire = function", 1, true), "client should not expose fire")
+end)
+
+t.suite("Emit — handler isolation")
+
+t.test("event handlers run on their own thread", function()
+	-- The batch walk runs inside one pcall; an inline handler that threw would
+	-- abort the rest of the batch and be reported as the sender's abuse.
+	local server, client = generate([[
+		event Attack from client { combo: u8 }
+		event Award from server { amount: u32 }
+	]])
+
+	t.ok(string.find(server, "task.spawn(handlerAttack, player, value)", 1, true), "server handler should be spawned")
+	t.ok(string.find(client, "task.spawn(handlerAward, value)", 1, true), "client handler should be spawned")
+end)
+
+t.test("a rate-limited fixed packet refuses before decoding", function()
+	-- A fixed body's size is a compile-time constant, so the cursor can skip
+	-- it without paying for the decode.
+	local server = generate("event Attack from client rate 10 { combo: u8 }")
+	local checkAt = string.find(server, "RateLimiter.allow(rateAttack", 1, true)
+	local readAt = string.find(server, "readAttack(b, o, limit, refs)", 1, true)
+
+	t.ok(checkAt ~= nil and readAt ~= nil, "both the check and the read should be present")
+	t.ok((checkAt :: number) < (readAt :: number), "the rate check should come before the decode")
+end)
+
+t.test("a rate-limited dynamic packet still decodes first", function()
+	-- A dynamic body's size is only known after the read; the cursor cannot
+	-- skip what it cannot measure.
+	local server = generate("event Chat from client rate 5 { text: string(100) }")
+	local checkAt = string.find(server, "RateLimiter.allow(rateChat", 1, true)
+	local readAt = string.find(server, "readChat(b, o, limit, refs)", 1, true)
+
+	t.ok(checkAt ~= nil and readAt ~= nil, "both the check and the read should be present")
+	t.ok((readAt :: number) < (checkAt :: number), "the decode should come before the rate check")
+end)
+
+t.test("handlers declare the channel they expect to arrive on", function()
+	-- Both remotes feed the same handler table, so without this a client could
+	-- send anything down either one and help itself to both of the engine's
+	-- throttles.
+	local server = generate([[
+		event Attack from client { combo: u8 }
+		unreliable Aim from client { yaw: angle }
+	]])
+
+	t.ok(string.find(server, "end, true)", 1, true), "a reliable event should register as reliable")
+	t.ok(string.find(server, "end, false)", 1, true), "an unreliable event should register as unreliable")
+end)
+
+t.test("the batch ceiling reaches the generated endpoint", function()
+	local server = generate("event Attack from client { combo: u8 }")
+	t.ok(string.find(server, "maxPacketsPerBatch = 256,", 1, true), "should carry the default ceiling")
+end)
+
+t.test("the batch ceiling is configurable", function()
+	local file, reporter = Parser.parseSource(
+		"net.btyn",
+		[[
+		config { server = "s.luau" client = "c.luau" max_packets_per_batch = 32 }
+		event A from client { a: u8 }
+	]]
+	)
+	local server = Luau.emitServer(Analyze.run(file, reporter))
+	t.ok(string.find(server, "maxPacketsPerBatch = 32,", 1, true), "should use the configured ceiling")
+end)
+
+t.suite("Emit — warnings")
+
+t.test("a client packet without a rate warns but still compiles", function()
+	local file, reporter = Parser.parseSource("net.btyn", CONFIG .. "event Attack from client { combo: u8 }")
+	local schema = Analyze.run(file, reporter)
+
+	t.eq(#reporter.warnings, 1, "should warn about the missing rate")
+	t.ok(string.find(reporter.warnings[1].message, "no rate limit", 1, true), "should say what is missing")
+	-- A warning never blocks output.
+	assertCompiles(Luau.emitServer(schema), "server")
+end)
+
+t.test("a rated client packet and a server packet warn about nothing", function()
+	local file, reporter = Parser.parseSource(
+		"net.btyn",
+		CONFIG .. [[
+		event Attack from client rate 10 { combo: u8 }
+		event Award from server { amount: u32 }
+		channel Health { hp: u8 }
+	]]
+	)
+	Analyze.run(file, reporter)
+	t.eq(#reporter.warnings, 0, "nothing here is an unlimited client packet")
 end)
 
 t.suite("Emit — codec filtering")

@@ -7,8 +7,9 @@
 	`from` — one less rule for the reader to memorise.
 
 	Comments follow Luau: a line comment starts with a double dash, and the
-	block form uses the same long-bracket syntax. The audience already writes
-	Luau all day, so that is one less rule to learn.
+	block form opens with `--[[` (the levelled `--[=[` long brackets are not
+	supported). The audience already writes Luau all day, so that is one less
+	rule to learn.
 ]]
 
 local Diagnostics = require("./Diagnostics")
