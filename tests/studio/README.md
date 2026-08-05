@@ -1,7 +1,8 @@
 # Studio integration test
 
-The headless suite (`lune run tests/run`) covers the compiler and the codecs.
-It cannot cover the part that needs a running engine: real RemoteEvents, real
+The headless suite (`lune run tests/run`) covers the compiler, the codecs and —
+against stand-ins for the Roblox globals — the transport's own rejections. What
+it cannot cover is the part that needs a running engine: real RemoteEvents, real
 batching across a frame, and the actual byte counts on the wire. That is what
 these two scripts are for.
 
@@ -54,6 +55,12 @@ Results from a run against `examples/net.btyn`:
   stalling anything else in the batch. The rejection path costs 4 B.
 - **Types.** `vec3`, `unit`, `angle`, enums as strings, nested structs, and
   bitfield-packed booleans all round-tripped through a real remote.
+- **Refusals.** Four hand-built payloads, of the kind only an exploiter sends
+  and the generated API cannot express: a 4096-packet batch against the ceiling
+  of 256, a reliable-only packet pushed down the unreliable remote, an unknown
+  opcode, and a payload that is not a buffer. Each is refused as one abuse
+  report and none reaches a handler. `tests/transport.spec.luau` pins the same
+  four headlessly; this confirms they survive a real wire.
 
 Every figure above reconciles exactly against what `--check` predicts for the
 schema. If a change makes them stop reconciling, something regressed.

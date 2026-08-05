@@ -38,6 +38,8 @@ local stats = {
 	abuse = 0,
 }
 
+local rejections: { string } = {}
+
 reliable.OnServerEvent:Connect(function(_, payload)
 	stats.reliableFires += 1
 	stats.reliableBytes += buffer.len(payload)
@@ -48,10 +50,33 @@ unreliable.OnServerEvent:Connect(function(_, payload)
 	stats.unreliableBytes += buffer.len(payload)
 end)
 
+-- Rate limiting reports once per dropped packet, and the flood below trips it
+-- hundreds of times. Printing only the first of each distinct reason keeps the
+-- output readable; the counts go in the summary.
+local reasonCounts: { [string]: number } = {}
+
 Net.onAbuse(function(player, reason)
 	stats.abuse += 1
-	say("abuse:", reason)
+	table.insert(rejections, reason)
+
+	local count = (reasonCounts[reason] or 0) + 1
+	reasonCounts[reason] = count
+	if count == 1 then
+		say("abuse:", reason)
+	end
 end)
+
+--[[
+	The client half deliberately sends four malformed batches at the end of its
+	run. Each should land here as exactly one abuse report, and none should
+	reach a handler.
+]]
+local EXPECTED_REJECTIONS = {
+	"more than 256 packets",
+	"wrong channel",
+	"unknown opcode",
+	"not a buffer",
+}
 
 Net.Attack.on(function(player, data)
 	stats.attacks += 1
@@ -131,6 +156,10 @@ local function runScenario(player: Player)
 
 	task.wait(1)
 
+	-- The client sends its four malformed batches last, so give them time to
+	-- arrive before the summary claims anything about them.
+	task.wait(9)
+
 	say("--- server counters ---")
 	say(`  reliable   : {stats.reliableFires} fires, {stats.reliableBytes} B`)
 	say(`  unreliable : {stats.unreliableFires} fires, {stats.unreliableBytes} B`)
@@ -139,6 +168,29 @@ local function runScenario(player: Player)
 	say(`  Chat       : {stats.chats} decoded`)
 	say(`  Buy        : {stats.buys} decoded`)
 	say(`  abuse      : {stats.abuse} reports`)
+
+	say("--- rejections ---")
+	for _, expected in EXPECTED_REJECTIONS do
+		local found = false
+		for _, reason in rejections do
+			if string.find(reason, expected, 1, true) then
+				found = true
+				break
+			end
+		end
+		say(`  {if found then "ok  " else "MISS"} {expected}`)
+	end
+
+	say("--- distinct abuse reasons ---")
+	for reason, count in reasonCounts do
+		say(`  {count}x {reason}`)
+	end
+
+	-- The flood carries 600 Attack packets. Only the first ten clear the rate
+	-- limit, and the walk stops at the 256th regardless — so a ceiling that
+	-- failed would show up as hundreds of rate-limit reports rather than the
+	-- 246 a working one produces, and as one missing ceiling rejection above.
+	say(`  Attack decoded in total: {stats.attacks} (the flood should add at most the rate limit's worth)`)
 	say("--- end ---")
 end
 

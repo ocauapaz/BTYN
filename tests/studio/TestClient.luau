@@ -115,6 +115,53 @@ end
 
 task.wait(4)
 
+--[[
+	Everything below sends hand-built payloads down the raw remotes, which is
+	what an exploiter does — the generated API cannot express any of it. The
+	headless suite covers the same rejections against stand-ins; this checks
+	they still hold when a real engine carries the bytes.
+]]
+
+-- Opcodes are assigned by sorted name, so Attack is 2 in this schema: one
+-- opcode byte plus a six byte body. The bodies here are left zeroed — the
+-- ceiling is counted before a packet ever reaches its handler, which is
+-- exactly the property being checked.
+--
+-- It has to be a reliable packet: an unreliable one would be refused by the
+-- channel check on the first byte, long before the count mattered, and an
+-- oversized unreliable payload would not arrive at all.
+local ATTACK_OPCODE = 2
+local ATTACK_STRIDE = 7
+local FLOOD_PACKETS = 600
+
+say(`sending {FLOOD_PACKETS} packets in one batch against a ceiling of 256`)
+local flood = buffer.create(ATTACK_STRIDE * FLOOD_PACKETS)
+for index = 0, FLOOD_PACKETS - 1 do
+	buffer.writeu8(flood, index * ATTACK_STRIDE, ATTACK_OPCODE)
+end
+reliable:FireServer(flood, nil)
+
+task.wait(1)
+
+say("sending a reliable-only packet down the unreliable remote")
+local misrouted = buffer.create(1)
+buffer.writeu8(misrouted, 0, ATTACK_OPCODE)
+unreliable:FireServer(misrouted, nil)
+
+task.wait(1)
+
+say("sending an unknown opcode")
+local unknown = buffer.create(1)
+buffer.writeu8(unknown, 0, 200)
+reliable:FireServer(unknown, nil)
+
+task.wait(1)
+
+say("sending a payload that is not a buffer")
+;(reliable :: any):FireServer("not a buffer", nil)
+
+task.wait(2)
+
 say("--- client counters ---")
 say(`  reliable   : {stats.reliableFires} fires, {stats.reliableBytes} B`)
 say(`  unreliable : {stats.unreliableFires} fires, {stats.unreliableBytes} B`)

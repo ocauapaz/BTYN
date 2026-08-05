@@ -112,6 +112,10 @@ const CONFIG_KEYS = {
 		detail: "default: 800",
 		doc: "Largest unreliable payload in bytes.\n\nRoblox does not publish this number; community measurement puts it near 1000. The default sits below that on purpose — undershooting costs a few bytes, overshooting costs silent data loss. Measure on your own place before raising it.",
 	},
+	max_packets_per_batch: {
+		detail: "default: 256",
+		doc: "Most packets one received batch may carry, enforced on the server only.\n\nThe smallest packet is a single opcode byte, so without a ceiling one payload becomes tens of thousands of handler calls in a frame — an amplification the per-packet rate limits cannot see, because they are only reached once the work has already been done.",
+	},
 	request_timeout: { detail: "default: 10", doc: "Seconds before an unanswered request fails." },
 	write_checks: {
 		detail: "default: true",
