@@ -218,6 +218,47 @@ pre code { background: none; padding: 0; }
 .hl .c   { color: var(--muted); font-style: italic; } /* comment */
 .hl .str { color: var(--kw-str); }                    /* string */
 
+/* Rouge's own tokens, for the languages it does have a lexer for — bash, json,
+   yaml. Rouge emits its spans server-side but ships no colours, so without this
+   every one of those blocks rendered in the plain text colour and looked
+   unhighlighted.
+
+   Scoped under `.highlight`, the wrapper Rouge puts around its output, because
+   several of its class names (`.k`, `.c`, `.m`, `.o`, `.n`) collide with the
+   ones the script above emits and mean different things. Same palette
+   variables, so both themes follow along. */
+.highlight .c, .highlight .ch, .highlight .cm, .highlight .c1, .highlight .cs,
+.highlight .cp, .highlight .cpf { color: var(--muted); font-style: italic; }
+
+.highlight .s, .highlight .s1, .highlight .s2, .highlight .sa, .highlight .sb,
+.highlight .sc, .highlight .sd, .highlight .se, .highlight .sh, .highlight .si,
+.highlight .sr, .highlight .ss, .highlight .sx, .highlight .dl { color: var(--kw-str); }
+
+.highlight .m, .highlight .mb, .highlight .mf, .highlight .mh, .highlight .mi,
+.highlight .mo, .highlight .il { color: var(--kw-num); }
+
+.highlight .k, .highlight .kd, .highlight .kn, .highlight .kp,
+.highlight .kr { color: var(--purple); font-weight: 600; }
+
+/* `true`, `false`, `null` — a literal rather than a keyword, and worth telling
+   apart from a string value in a JSON block. */
+.highlight .kc { color: var(--kw-lit); }
+.highlight .kt { color: var(--kw-type); }
+
+/* A JSON key (`.nl`), a YAML key (`.na`) and an XML tag (`.nt`) all sit in the
+   same role: the name on the left of the value. */
+.highlight .nl, .highlight .na, .highlight .nt { color: var(--kw-type); }
+
+.highlight .nb, .highlight .nf, .highlight .fm { color: var(--kw-fn); }
+.highlight .nv, .highlight .vc, .highlight .vg, .highlight .vi { color: var(--kw-lit); }
+.highlight .nc, .highlight .nn, .highlight .no { color: var(--fg); font-weight: 600; }
+/* `.pi` is YAML's list dash and mapping colon — punctuation by any other name. */
+.highlight .o, .highlight .ow, .highlight .p, .highlight .pi { color: var(--muted); }
+
+/* Rouge marks anything its lexer cannot place as an error. In a shell block
+   that is ordinary punctuation, so it stays plain rather than shouting. */
+.highlight .err { color: inherit; background: none; }
+
 /* Tables */
 table {
 	width: 100%;
@@ -233,6 +274,12 @@ th, td {
 	border-bottom: 1px solid var(--line);
 	vertical-align: top;
 }
+/* A default value like `game:GetService("ReplicatedStorage"):WaitForChild("BTYN")`
+   is one token with nowhere to break, so the column claimed 502px of a 744px
+   page and pushed the meaning column off the right edge. `anywhere` rather than
+   `break-word` because only `anywhere` lets the cell's min-content width shrink,
+   which is what the column is sized from. */
+td code { overflow-wrap: anywhere; }
 th {
 	font-weight: 600;
 	color: var(--muted);
