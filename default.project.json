@@ -1,0 +1,11 @@
+{
+  "name": "BTYN",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "BTYN": {
+        "$path": "src"
+      }
+    }
+  }
+}
