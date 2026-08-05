@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  compiler:
+    name: Compiler and codecs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: CompeyDev/setup-rokit@v0.1.2
+
+      - name: Test
+        run: lune run tests/run
+
+      # The example is the schema the Studio integration test exercises, so a
+      # change that stops it compiling should fail here rather than in Studio.
+      - name: Compile the example schema
+        run: lune run cli/main -- examples/net.btyn --check
+
+      - name: Benchmark
+        run: lune run bench/run
+
+  extension:
+    name: VS Code extension
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install
+        run: npm install --no-save vscode-textmate vscode-oniguruma
+
+      # Tokenises with the same engine VS Code uses, and checks the extension's
+      # documented byte sizes still agree with cli/Ast.luau.
+      - name: Test
+        run: npm test
+
+      - name: Package
+        run: npx --yes @vscode/vsce package --skip-license

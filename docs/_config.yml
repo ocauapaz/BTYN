@@ -1,0 +1,39 @@
+title: BTYN
+description: A networking compiler for Roblox
+url: https://ocauapaz.github.io
+baseurl: /BTYN
+
+# Own layout, no gem theme — the site is four pages in two languages and does
+# not need a framework.
+permalink: pretty
+
+# Rewrites relative .md links to their built permalinks, so the same link works
+# both on the site and when browsing the repository on GitHub.
+plugins:
+  - jekyll-relative-links
+
+relative_links:
+  enabled: true
+  collections: false
+
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - vendor
+
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
+      lang: en
+  - scope:
+      path: "pt-br"
+    values:
+      layout: default
+      lang: pt-br
