@@ -40,18 +40,37 @@ Every field is validated before your code runs:
   damage formula
 - **Lengths** — `string(24)` and `[u16; 100]` reject anything longer, so there is
   no unbounded allocation from a hostile sender
-- **Finiteness** — `NaN` and infinity are rejected on every float, which closes
-  the classic route to poisoning a physics or economy calculation
+- **Finiteness** — `NaN` and infinity are rejected on every float, including the
+  components of `vec3` and the position of a `cframe`, which closes the classic
+  route to poisoning a physics or economy calculation
 - **Enums** — an index outside the declared variants is rejected
+- **Directions** — a `unit` is normalised on arrival. The raw encoding allows a
+  vector of magnitude 1.73, which a hitscan trusting the name would turn into
+  73% of extra reach
+- **Instances** — an `Instance` field is checked to actually hold one. The
+  sidecar array that carries them is sender-controlled, and nothing else stops a
+  client putting a string or a table where your type says `Instance`
+- **Batch size** — a batch carrying more than `max_packets_per_batch` packets
+  (256 by default) is refused. The smallest packet is a single opcode byte, so
+  without a ceiling one payload becomes tens of thousands of handler calls in a
+  frame — an amplification the per-packet rate limits cannot see, because they
+  are only reached once the work has already been done
+- **Channels** — a packet has to arrive on the remote its schema declares. Both
+  remotes feed the same dispatch table, so otherwise a client could send
+  anything down either one and help itself to both of the engine's throttles
 
 Caps are mandatory in the schema for exactly this reason. An uncapped `string`
 is not a convenience, it is an amplification primitive, so BTYN makes it a
 compile error rather than a default.
 
 Together this eliminates a whole class of attack: malformed payloads, giant
-strings, unbounded arrays, and `NaN` poisoning. It is the largest genuine
-security difference between a schema-validated transport and hand-rolled
-remotes.
+strings, unbounded arrays, `NaN` poisoning, and batch amplification. It is the
+largest genuine security difference between a schema-validated transport and
+hand-rolled remotes.
+
+What it does **not** validate is `entity`. That type is a bare `u32` naming
+something your game owns, and only your game knows which ids a given player may
+name — see the handler example below.
 
 ### Rate limiting
 
@@ -65,6 +84,15 @@ degrade the server for everyone.
 
 An over-budget packet is dropped and reported — never queued, because queueing
 an abusive sender just moves the cost somewhere less visible.
+
+The rate must be greater than zero. A bucket that never refills would hand out
+its initial burst and then refuse the packet forever, which reads as the event
+being broken rather than as the limit it is, so it is a compile error.
+
+Leaving `rate` off a client-sent packet is a compile **warning**. It still
+builds — a schema in progress has every right to be incomplete — but it is the
+one item on the checklist below that the compiler can check for you, so it
+does.
 
 ```luau
 Net.onAbuse(function(player, reason)
@@ -92,6 +120,29 @@ packets the server never sends it, no writer for packets it never sends.
 reliable path. Abuse of the unreliable channel cannot take down general
 replication with it — another reason to keep cosmetic traffic on `unreliable`
 and consequential traffic on `event`.
+
+### Replies are bound to their peer
+
+A `request` from the server carries a correlation id, and the registry holding
+those ids is shared across every player on the server. A reply is only accepted
+from the player the request was actually sent to. Without that binding, ids
+being sequential, any client could answer — or blind-scan every id and answer —
+a question the server asked somebody else.
+
+A forged reply is dropped as silently as a late one. An attacker learns nothing
+from the difference.
+
+## Handlers run on their own thread
+
+Your handler is resumed on a fresh thread rather than inline in the batch walk.
+An error in one handler cannot discard the rest of the batch or be misreported
+as the sender's abuse, and a handler that yields cannot stall the packets
+behind it.
+
+The trade is that two handlers in the same batch have no completion order if
+the first one yields. If a pair of packets is only safe in sequence — a charge
+and its release — validate before you yield, or carry the ordering in the
+payload rather than relying on arrival.
 
 ## What BTYN cannot do for you
 
@@ -125,7 +176,8 @@ all — a field that does not exist cannot be forged.
 
 - [ ] Every consequential decision is made server-side from server-held state
 - [ ] Values the server can derive are not sent by the client
-- [ ] Client-to-server packets carry a `rate`
+- [ ] Client-to-server packets carry a `rate` (the compiler warns when they do not)
+- [ ] Every `entity` id is checked for existence and ownership before it is used
 - [ ] `onAbuse` is wired to your logging
 - [ ] Ranges are declared (`u8(0..100)`) rather than left wide
 - [ ] Caps are as tight as the real data, not just tight enough to compile

@@ -31,6 +31,9 @@ export type Config = {
 	unreliableCap: number,
 	budget: number,
 	manual: boolean,
+	-- Ceiling on how many packets one received batch may contain. Enforced on
+	-- the server only: see `consume`.
+	maxPacketsPerBatch: number,
 }
 
 export type Handler = (player: Player?, b: buffer, offset: number, limit: number, refs: { Instance }?) -> number
@@ -82,6 +85,9 @@ export type Endpoint = {
 	reliable: RemoteEvent,
 	unreliable: UnreliableRemoteEvent,
 	handlers: { [number]: Handler },
+	-- Which channel each opcode is declared to travel on, so a packet that
+	-- arrives on the other one can be refused.
+	handlerReliable: { [number]: boolean },
 	-- server: keyed by player; client: a single pair under the `false` key
 	reliableStreams: { [any]: StreamType },
 	unreliableStreams: { [any]: StreamType },
@@ -97,6 +103,13 @@ export type Endpoint = {
 	connections: { RBXScriptConnection },
 }
 
+-- Weak keys, for the streams below. `PlayerRemoving` drops a leaver's batch
+-- immediately, but anything that writes to a departed player afterwards — a
+-- `to(player)` call holding a stale reference — would otherwise open a fresh
+-- stream that nothing ever clears again. The client keys its pair under `false`,
+-- which is not collectable, so it is unaffected.
+local WEAK_KEYS = { __mode = "k" }
+
 local function newEndpoint(config: Config): Endpoint
 	local reliable, unreliable = resolveRemotes()
 	return {
@@ -104,8 +117,9 @@ local function newEndpoint(config: Config): Endpoint
 		reliable = reliable,
 		unreliable = unreliable,
 		handlers = {},
-		reliableStreams = {},
-		unreliableStreams = {},
+		handlerReliable = {},
+		reliableStreams = setmetatable({}, WEAK_KEYS) :: any,
+		unreliableStreams = setmetatable({}, WEAK_KEYS) :: any,
 		scratch = Stream.new(),
 		onAbuse = nil,
 		beforeFlush = nil,
@@ -121,14 +135,38 @@ end
 	the batch cannot be located either — offsets are only meaningful in
 	sequence — so the remainder is dropped and the sender reported. For a
 	legitimate client this never happens: the same compiler wrote both sides.
+
+	Two limits apply to what a client sends, and to nothing the server sends:
+
+	  * A batch may carry at most `maxPacketsPerBatch` packets. The smallest
+	    packet is one opcode byte with an empty body, so without a ceiling a
+	    single payload of a few tens of kilobytes becomes tens of thousands of
+	    handler invocations in one frame — an amplification factor the per
+	    packet rate limits cannot see, because they are only reached once the
+	    loop has already run.
+	  * A packet has to arrive on the channel its schema declares. Both remotes
+	    feed this same handler table, so otherwise a client could send anything
+	    down either one and help itself to both of the engine's throttles.
+
+	The client applies neither: everything it receives came from the server.
 ]]
-local function consume(endpoint: Endpoint, player: Player?, payload: buffer, refs: { Instance }?)
+local function consume(endpoint: Endpoint, player: Player?, payload: buffer, refs: { Instance }?, reliable: boolean)
 	local limit = buffer.len(payload)
 	local opcodeBytes = endpoint.config.opcodeBytes
+	local untrusted = endpoint.isServer
+	local maxPackets = endpoint.config.maxPacketsPerBatch
 	local cursor = 0
+	local seen = 0
 
 	local ok, err = pcall(function()
 		while cursor < limit do
+			if untrusted then
+				seen += 1
+				if seen > maxPackets then
+					error(`btyn: batch carries more than {maxPackets} packets`, 0)
+				end
+			end
+
 			if cursor + opcodeBytes > limit then
 				error("btyn: truncated opcode", 0)
 			end
@@ -141,6 +179,13 @@ local function consume(endpoint: Endpoint, player: Player?, payload: buffer, ref
 			local handler = endpoint.handlers[opcode]
 			if not handler then
 				error(`btyn: unknown opcode {opcode}`, 0)
+			end
+
+			-- Nil for a generated file predating this check; skipped rather
+			-- than treated as a mismatch, so a stale build still runs.
+			local expected = endpoint.handlerReliable[opcode]
+			if untrusted and expected ~= nil and expected ~= reliable then
+				error(`btyn: opcode {opcode} arrived on the wrong channel`, 0)
 			end
 
 			cursor += handler(player, payload, cursor, limit, refs)
@@ -167,6 +212,20 @@ end
 ]]
 local function flushStream(endpoint: Endpoint, key: any, stream: StreamType, reliable: boolean)
 	if Stream.isEmpty(stream) then
+		return
+	end
+
+	-- A stream can reappear for a player who already left: a request handler
+	-- that yielded across the disconnect, or a stale `to(player)` reference.
+	-- Firing at a gone player throws, which would abort the whole flush loop
+	-- and delay every other player's batch by a frame.
+	if endpoint.isServer and (key :: Player).Parent == nil then
+		Stream.reset(stream)
+		if reliable then
+			endpoint.reliableStreams[key] = nil
+		else
+			endpoint.unreliableStreams[key] = nil
+		end
 		return
 	end
 
@@ -221,8 +280,9 @@ function Transport.reserve(endpoint: Endpoint, key: any, reliable: boolean, byte
 	return buf, offset, stream
 end
 
-function Transport.setHandler(endpoint: Endpoint, opcode: number, handler: Handler)
+function Transport.setHandler(endpoint: Endpoint, opcode: number, handler: Handler, reliable: boolean?)
 	endpoint.handlers[opcode] = handler
+	endpoint.handlerReliable[opcode] = reliable
 end
 
 --[[
@@ -289,7 +349,7 @@ function Transport.start(endpoint: Endpoint)
 					end
 					return
 				end
-				consume(endpoint, player, payload, refs)
+				consume(endpoint, player, payload, refs, true)
 			end)
 		)
 		table.insert(
@@ -301,7 +361,7 @@ function Transport.start(endpoint: Endpoint)
 					end
 					return
 				end
-				consume(endpoint, player, payload, refs)
+				consume(endpoint, player, payload, refs, false)
 			end)
 		)
 
@@ -317,13 +377,13 @@ function Transport.start(endpoint: Endpoint)
 		table.insert(
 			endpoint.connections,
 			endpoint.reliable.OnClientEvent:Connect(function(payload, refs)
-				consume(endpoint, nil, payload, refs)
+				consume(endpoint, nil, payload, refs, true)
 			end)
 		)
 		table.insert(
 			endpoint.connections,
 			endpoint.unreliable.OnClientEvent:Connect(function(payload, refs)
-				consume(endpoint, nil, payload, refs)
+				consume(endpoint, nil, payload, refs, false)
 			end)
 		)
 	end

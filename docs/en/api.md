@@ -108,7 +108,9 @@ health.destroy()                     -- tells holders to drop it
 ```
 
 `of` returns the same handle for the same id, so calling it in a loop does not
-allocate.
+allocate. After `destroy` the id is free again: calling `of` with it — even in
+the same frame — gives you a fresh entity, and the client sees the removal
+before the new keyframe.
 
 `set` compares before marking. Re-setting a field to the value it already holds
 does nothing, which means you can hand it your whole state every frame without

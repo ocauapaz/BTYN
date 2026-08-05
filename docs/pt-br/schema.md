@@ -111,6 +111,10 @@ Limitado a 32 campos, o que mantém a máscara em um único acesso. Dividir é
 melhor design de qualquer forma: campos que mudam em ritmos diferentes querem
 prioridades diferentes.
 
+Um channel não aceita `rate` nem `from`. Ele já envia no máximo uma vez por
+frame por jogador, e sempre replica do servidor para o cliente; os dois são
+rejeitados em tempo de compilação em vez de aceitos e ignorados.
+
 ### `struct` e `enum`
 
 ```btyn
@@ -140,6 +144,7 @@ config {
 | `runtime` | `game:GetService("ReplicatedStorage"):WaitForChild("BTYN")` | Expressão Luau que os arquivos gerados usam para achar o runtime |
 | `budget` | `40000` | Orçamento suave de saída por cliente, bytes/segundo |
 | `unreliable_cap` | `800` | Maior payload unreliable, em bytes |
+| `max_packets_per_batch` | `256` | Máximo de pacotes num batch recebido, no servidor |
 | `request_timeout` | `10` | Segundos até uma requisição sem resposta falhar |
 | `write_checks` | `true` | Validar na saída além da entrada |
 | `manual` | `false` | Dar flush na mão em vez de no Heartbeat |
@@ -197,6 +202,12 @@ Opcional. Quando `T` tem tamanho fixo isso custa **um bit** e mantém o pacote n
 caminho rápido de offset constante — os bytes do payload são sempre escritos,
 zerados quando ausente. Quando `T` é dinâmico, custa um byte de presença.
 
+Esse bit de presença vive no bitfield do pacote (ou do struct), que elementos
+de array e campos de channel não têm — então um opcional de tipo *fixo* é
+rejeitado nesses dois lugares. Embrulhe num struct, que carrega seu próprio
+bitfield: `struct Slot { value: u16? }`. Opcionais de tipos dinâmicos gastam um
+byte de presença e funcionam em qualquer lugar.
+
 ### Valores da Roblox
 
 | Tipo | Bytes | Observação |
@@ -204,7 +215,7 @@ zerados quando ausente. Quando `T` é dinâmico, custa um byte de presença.
 | `vec3` | 12 | 3 × `f32` |
 | `cframe` | 18 | posição em 3 × `f32`, rotação em ângulos de Euler quantizados |
 | `color3` | 3 | um byte por canal |
-| `unit` | 6 | vetor unitário, cada componente quantizado em `i16` |
+| `unit` | 6 | vetor unitário, cada componente quantizado em `i16`; normalizado na leitura |
 | `angle` | 2 | radianos quantizados em `[-pi, pi]` |
 | `Instance` | 2 | índice em um array lateral — veja abaixo |
 

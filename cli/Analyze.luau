@@ -60,6 +60,10 @@ export type Config = {
 	budget: number,
 	unreliableCap: number,
 	manual: boolean,
+	-- Ceiling on packets in one received batch, enforced server-side. The
+	-- smallest packet is a single opcode byte, so without this a client can
+	-- turn one payload into tens of thousands of handler calls in a frame.
+	maxPacketsPerBatch: number,
 	-- Luau expression the generated files use to reach the BTYN runtime.
 	runtime: string,
 	-- Seconds before an unanswered request gives up.
@@ -87,6 +91,7 @@ local CONFIG_KEYS = {
 	"typescript",
 	"budget",
 	"unreliable_cap",
+	"max_packets_per_batch",
 	"manual",
 	"runtime",
 	"write_checks",
@@ -110,6 +115,11 @@ local DEFAULT_UNRELIABLE_CAP = 800
 -- replication, so only part of it is ours to spend.
 local DEFAULT_BUDGET = 40000
 
+-- Packets one received batch may carry. A client sending more than this in a
+-- single frame is not playing the game: a busy frame of ordinary input is a
+-- handful of packets, and the server's own batches are not subject to this.
+local DEFAULT_MAX_PACKETS_PER_BATCH = 256
+
 local function defaultConfig(): Config
 	return {
 		server = "",
@@ -118,6 +128,7 @@ local function defaultConfig(): Config
 		typescript = false,
 		budget = DEFAULT_BUDGET,
 		unreliableCap = DEFAULT_UNRELIABLE_CAP,
+		maxPacketsPerBatch = DEFAULT_MAX_PACKETS_PER_BATCH,
 		manual = false,
 		runtime = DEFAULT_RUNTIME,
 		writeChecks = true,
@@ -133,6 +144,28 @@ local function expectType(reporter: ReporterImpl, entry: Ast.ConfigEntry, expect
 		message = `config key '{entry.key}' expects a {expected}, got a {type(entry.value)}`,
 		span = entry.valueSpan,
 		label = `expected a {expected}`,
+	})
+	return false
+end
+
+--[[
+	Numeric config keys are all sizes and durations. Zero or negative makes the
+	generated runtime quietly nonsensical — a zero `unreliable_cap` flushes on
+	every packet, a zero `budget` starves every non-high channel forever — so it
+	is rejected here rather than discovered in Studio.
+]]
+local function expectPositive(reporter: ReporterImpl, entry: Ast.ConfigEntry, help: string): boolean
+	if not expectType(reporter, entry, "number") then
+		return false
+	end
+	if (entry.value :: number) > 0 then
+		return true
+	end
+	reporter:add({
+		message = `config key '{entry.key}' must be greater than zero, got {entry.value}`,
+		span = entry.valueSpan,
+		label = "not a usable value",
+		help = help,
 	})
 	return false
 end
@@ -187,12 +220,16 @@ local function readConfig(decls: { Ast.Decl }, reporter: ReporterImpl): Config
 					end
 				end
 			elseif entry.key == "budget" then
-				if expectType(reporter, entry, "number") then
+				if expectPositive(reporter, entry, "this is the per-client outbound allowance in bytes per second") then
 					config.budget = entry.value :: number
 				end
 			elseif entry.key == "unreliable_cap" then
-				if expectType(reporter, entry, "number") then
+				if expectPositive(reporter, entry, "this is the UnreliableRemoteEvent payload cap in bytes; measure it on a real place before raising it") then
 					config.unreliableCap = entry.value :: number
+				end
+			elseif entry.key == "max_packets_per_batch" then
+				if expectPositive(reporter, entry, "this is how many packets one received batch may carry before the sender is refused") then
+					config.maxPacketsPerBatch = entry.value :: number
 				end
 			elseif entry.key == "manual" then
 				if expectType(reporter, entry, "boolean") then
@@ -207,7 +244,7 @@ local function readConfig(decls: { Ast.Decl }, reporter: ReporterImpl): Config
 					config.writeChecks = entry.value :: boolean
 				end
 			elseif entry.key == "request_timeout" then
-				if expectType(reporter, entry, "number") then
+				if expectPositive(reporter, entry, "this is how many seconds a caller waits before giving up") then
 					config.requestTimeout = entry.value :: number
 				end
 			else
@@ -433,6 +470,23 @@ function Analyze.run(file: Ast.File, reporter: ReporterImpl): Schema
 			local body = buildBody(decl.fields, symbols)
 			local reply: Body? = if decl.kind == "request" then buildBody(decl.reply, symbols) else nil
 
+			-- A channel delta has no bitfield, so an optional of a fixed type
+			-- has nowhere to put its presence bit — the wire format cannot
+			-- express it. Optionals of dynamic types spend a presence byte
+			-- instead and are fine.
+			if decl.kind == "channel" then
+				for _, field in body.fields do
+					if field.type.kind == "optional" and field.type.fixed then
+						reporter:add({
+							message = `channel '{decl.name}' field '{field.name}' is an optional of a fixed-size type`,
+							span = field.span,
+							label = "not representable in a delta",
+							help = "wrap it in a struct — `struct Slot { value: u16? }` — which carries its own presence bit, or use a sentinel value",
+						})
+					end
+				end
+			end
+
 			local packet: Packet = {
 				name = decl.name,
 				kind = decl.kind,
@@ -485,10 +539,10 @@ function Analyze.run(file: Ast.File, reporter: ReporterImpl): Schema
 
 	reporter:bailIfErrors()
 
-	-- The opcode is the first byte of every packet. One byte covers 255
-	-- packets; past that every opcode widens to two rather than paying for an
-	-- escape-code branch on the hot path.
-	local opcodeBytes = if nextOpcode <= 255 then 1 else 2
+	-- The opcode is the first byte of every packet. Opcodes start at zero, so
+	-- one byte covers 256 of them; past that every opcode widens to two rather
+	-- than paying for an escape-code branch on the hot path.
+	local opcodeBytes = if nextOpcode <= 256 then 1 else 2
 
 	for _, packet in packets do
 		if packet.reliable then
@@ -507,6 +561,21 @@ function Analyze.run(file: Ast.File, reporter: ReporterImpl): Schema
 	end
 
 	reporter:bailIfErrors()
+
+	-- A client-sent packet with no rate is unlimited, and nothing else in the
+	-- system will notice. This is the one piece of the security checklist the
+	-- compiler can actually check, so it does — as a warning, since a schema
+	-- under development has every right to be incomplete.
+	for _, packet in packets do
+		if packet.from == "client" and packet.rate == nil then
+			reporter:warn({
+				message = `'{packet.name}' is sent by the client and has no rate limit`,
+				span = packet.nameSpan,
+				label = "no `rate` here",
+				help = `add \`rate <n>\` — without one a single client can send this as fast as it likes, and only the batch ceiling of {config.maxPacketsPerBatch} packets stands in the way`,
+			})
+		end
+	end
 
 	local structCache: { [string]: Resolve.Resolved } = {}
 	for name, resolved in symbols.cache do

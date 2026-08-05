@@ -40,6 +40,14 @@ export type Options = {
 
 local PI = "3.1415926535897932"
 
+-- Shortest vector still treated as a direction. Below this the normalisation
+-- a `unit` read performs would divide by ~zero and hand back NaN.
+local MIN_DIRECTION = "1e-6"
+
+-- The ref index is a u16, so a batch cannot address more than this many
+-- Instances.
+local MAX_REFS = 65535
+
 --[[
 	Numeric primitives that map straight onto a buffer accessor.
 ]]
@@ -94,6 +102,19 @@ local function reject(w: Impl, reason: string)
 end
 
 --[[
+	Expression that is true when `value` is NaN or infinite.
+
+	Both poison a physics or economy calculation the same way, and both ride
+	inside an otherwise well-formed packet. Every float crossing the trust
+	boundary is tested with this — including the components of `vec3` and
+	`cframe`, which are floats wearing a different name and were the one hole
+	in this net.
+]]
+local function notFinite(value: string): string
+	return `{value} ~= {value} or {value} == math.huge or {value} == -math.huge`
+end
+
+--[[
 	Emits validation for a value that has just been read.
 ]]
 local function validateRead(w: Impl, ty: Resolved, value: string, label: string, options: Options)
@@ -104,9 +125,7 @@ local function validateRead(w: Impl, ty: Resolved, value: string, label: string,
 	local name = ty.name
 
 	if name and FLOATS[name] then
-		-- NaN and infinity are the classic way to poison a physics or economy
-		-- calculation through an otherwise well-formed packet.
-		w:push(`if {value} ~= {value} or {value} == math.huge or {value} == -math.huge then`)
+		w:push(`if {notFinite(value)} then`)
 		reject(w, `{label} is not a finite number`)
 		w:pop("end")
 	end
@@ -203,6 +222,11 @@ local function writeFixed(w: Impl, ty: Resolved, value: string, offset: string, 
 	end
 
 	if ty.kind == "instance" then
+		if options.writeChecks then
+			w:push(`if #refs >= {MAX_REFS} then`)
+			w:line(`error("btyn: more than {MAX_REFS} Instance references in one batch", 0)`)
+			w:pop("end")
+		end
 		w:line(`refs[#refs + 1] = {value}`)
 		w:line(`buffer.writeu16(b, {offset}, #refs)`)
 		return
@@ -272,11 +296,44 @@ local function readFixed(w: Impl, ty: Resolved, offset: string, label: string, o
 	end
 
 	if ty.kind == "prim" and name == "vec3" then
-		return `Vector3.new(buffer.readf32(b, {offset}), buffer.readf32(b, {Writer.offset(offset, 4)}), buffer.readf32(b, {Writer.offset(offset, 8)}))`
+		if not options.readChecks then
+			return `Vector3.new(buffer.readf32(b, {offset}), buffer.readf32(b, {Writer.offset(offset, 4)}), buffer.readf32(b, {Writer.offset(offset, 8)}))`
+		end
+
+		local x, y, z = `{temp}X`, `{temp}Y`, `{temp}Z`
+		w:line(`local {x} = buffer.readf32(b, {offset})`)
+		w:line(`local {y} = buffer.readf32(b, {Writer.offset(offset, 4)})`)
+		w:line(`local {z} = buffer.readf32(b, {Writer.offset(offset, 8)})`)
+		w:push(`if {notFinite(x)} or {notFinite(y)} or {notFinite(z)} then`)
+		reject(w, `{label} is not a finite vector`)
+		w:pop("end")
+		w:line(`local {temp} = Vector3.new({x}, {y}, {z})`)
+		return temp
 	end
 
 	if ty.kind == "prim" and name == "unit" then
-		return `Vector3.new(buffer.readi16(b, {offset}) / 32767, buffer.readi16(b, {Writer.offset(offset, 2)}) / 32767, buffer.readi16(b, {Writer.offset(offset, 4)}) / 32767)`
+		-- Each component decodes into [-1.00003, 1], so three at full scale
+		-- make a vector of magnitude 1.73 — the raw decode is not a unit
+		-- vector at all. A caller trusting the name for a hitscan direction
+		-- would get 73% more reach than it asked for, which is a reach hack
+		-- handed out by the codec. Normalising here makes the type honest;
+		-- the sender pays nothing, since only the receiver runs this.
+		local x, y, z = `{temp}X`, `{temp}Y`, `{temp}Z`
+		local magnitude = `{temp}Mag`
+
+		w:line(`local {x} = buffer.readi16(b, {offset}) / 32767`)
+		w:line(`local {y} = buffer.readi16(b, {Writer.offset(offset, 2)}) / 32767`)
+		w:line(`local {z} = buffer.readi16(b, {Writer.offset(offset, 4)}) / 32767`)
+		w:line(`local {magnitude} = math.sqrt({x} * {x} + {y} * {y} + {z} * {z})`)
+
+		if options.readChecks then
+			w:push(`if {magnitude} < {MIN_DIRECTION} then`)
+			reject(w, `{label} is not a direction`)
+			w:pop("end")
+		end
+
+		w:line(`local {temp} = Vector3.new({x} / {magnitude}, {y} / {magnitude}, {z} / {magnitude})`)
+		return temp
 	end
 
 	if ty.kind == "prim" and name == "angle" then
@@ -288,12 +345,20 @@ local function readFixed(w: Impl, ty: Resolved, offset: string, label: string, o
 	end
 
 	if ty.kind == "prim" and name == "cframe" then
-		w:line(`local {temp} = CFrame.new(`)
-		w:push()
-		w:line(
-			`buffer.readf32(b, {offset}), buffer.readf32(b, {Writer.offset(offset, 4)}), buffer.readf32(b, {Writer.offset(offset, 8)})`
-		)
-		w:pop(`) * CFrame.fromEulerAnglesXYZ(`)
+		-- Only the position is checked: the rotation arrives as three i16 and
+		-- is bounded by its own width, so it cannot carry NaN or infinity.
+		local x, y, z = `{temp}X`, `{temp}Y`, `{temp}Z`
+		w:line(`local {x} = buffer.readf32(b, {offset})`)
+		w:line(`local {y} = buffer.readf32(b, {Writer.offset(offset, 4)})`)
+		w:line(`local {z} = buffer.readf32(b, {Writer.offset(offset, 8)})`)
+
+		if options.readChecks then
+			w:push(`if {notFinite(x)} or {notFinite(y)} or {notFinite(z)} then`)
+			reject(w, `{label} position is not finite`)
+			w:pop("end")
+		end
+
+		w:line(`local {temp} = CFrame.new({x}, {y}, {z}) * CFrame.fromEulerAnglesXYZ(`)
 		w:push()
 		w:line(
 			`buffer.readi16(b, {Writer.offset(offset, 12)}) / 32767 * {PI}, buffer.readi16(b, {Writer.offset(offset, 14)}) / 32767 * {PI}, buffer.readi16(b, {Writer.offset(offset, 16)}) / 32767 * {PI}`
@@ -310,6 +375,15 @@ local function readFixed(w: Impl, ty: Resolved, offset: string, label: string, o
 			w:pop("end")
 		end
 		w:line(`local {temp} = refs[{temp}Index]`)
+		if options.readChecks then
+			-- `refs` is the second argument of the remote call and is entirely
+			-- sender-controlled. Nothing stops a client putting a string, a
+			-- number or a table where the schema says Instance, and the
+			-- generated type would still claim it is one.
+			w:push(`if typeof({temp}) ~= "Instance" then`)
+			reject(w, `{label} is not an Instance`)
+			w:pop("end")
+		end
 		return temp
 	end
 
@@ -507,28 +581,39 @@ local function writeBitfield(w: Impl, fields: { ResolvedField }, bitfieldBytes: 
 		return
 	end
 
+	-- Flattened to one entry per bit before chunking. A `bool?` spends two bits
+	-- — presence, then value — and those two can land either side of a chunk
+	-- boundary, so each bit is placed by its own index rather than assumed to
+	-- share the presence bit's chunk. Assuming otherwise wrote the value bit
+	-- into the wrong accumulator, where it was silently truncated away.
+	local placements: { { bit: number, condition: string } } = {}
+	for _, field in fields do
+		local bit = field.bit
+		if bit == nil then
+			continue
+		end
+
+		if field.type.kind == "optional" then
+			table.insert(placements, { bit = bit, condition = `v.{field.name} ~= nil` })
+			local inner = field.type.of :: Resolved
+			if inner.kind == "bool" then
+				table.insert(placements, { bit = bit + 1, condition = `v.{field.name} == true` })
+			end
+		else
+			table.insert(placements, { bit = bit, condition = `v.{field.name}` })
+		end
+	end
+
 	for chunkIndex, chunk in Codec.bitChunks(bitfieldBytes) do
 		local lastBit = chunk.firstBit + chunk.width * 8 - 1
 		local acc = `w{chunkIndex}`
 		w:line(`local {acc} = 0`)
 
-		for _, field in fields do
-			local bit = field.bit
-			if bit == nil or bit < chunk.firstBit or bit > lastBit then
+		for _, placement in placements do
+			if placement.bit < chunk.firstBit or placement.bit > lastBit then
 				continue
 			end
-
-			local mask = 2 ^ (bit - chunk.firstBit)
-			if field.type.kind == "optional" then
-				w:line(`if v.{field.name} ~= nil then {acc} += {mask} end`)
-				-- An optional bool spends a second bit on its value.
-				local inner = field.type.of :: Resolved
-				if inner.kind == "bool" then
-					w:line(`if v.{field.name} == true then {acc} += {2 ^ (bit + 1 - chunk.firstBit)} end`)
-				end
-			else
-				w:line(`if v.{field.name} then {acc} += {mask} end`)
-			end
+			w:line(`if {placement.condition} then {acc} += {2 ^ (placement.bit - chunk.firstBit)} end`)
 		end
 
 		w:line(`buffer.write{accessor(chunk.width)}(b, {Writer.offset(offset, chunk.offset)}, {acc})`)

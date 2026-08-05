@@ -109,6 +109,9 @@ health.destroy()                     -- manda quem tem descartar
 ```
 
 `of` devolve o mesmo handle para o mesmo id, então chamar em loop não aloca.
+Depois de `destroy` o id fica livre de novo: chamar `of` com ele — mesmo no
+mesmo frame — devolve uma entidade nova, e o cliente recebe a remoção antes do
+novo keyframe.
 
 `set` compara antes de marcar. Reatribuir um campo com o valor que ele já tem
 não faz nada, o que significa que você pode jogar o estado inteiro nele todo

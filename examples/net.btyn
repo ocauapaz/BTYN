@@ -49,7 +49,11 @@ unreliable Muzzle from server {
 
 -- Aim updates many times a second. Quantised angles cost two bytes each
 -- instead of the eight a pair of f32s would.
-unreliable Aim from client {
+--
+-- The rate is deliberately above frame rate: an honest client sends one of
+-- these per frame, so the limit is there to bound a client that decides not
+-- to, not to police an ordinary one on a high-refresh display.
+unreliable Aim from client rate 120 {
 	yaw:   angle,
 	pitch: angle,
 }

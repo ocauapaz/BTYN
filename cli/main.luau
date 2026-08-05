@@ -36,15 +36,19 @@ local WATCH_INTERVAL = 0.3
 	Creates every missing directory along a path.
 ]]
 local function ensureDirectory(path: string)
-	local parts = string.split(string.gsub(path, "\\", "/"), "/")
+	local normalised = string.gsub(path, "\\", "/")
+	local parts = string.split(normalised, "/")
 	table.remove(parts)
 
-	local built = ""
+	-- An absolute path starts with an empty segment. Dropping it silently would
+	-- turn `/opt/game/Net.luau` into a `./opt` directory beside the schema.
+	local built = if string.sub(normalised, 1, 1) == "/" then "/" else ""
+
 	for _, part in parts do
 		if part == "" then
 			continue
 		end
-		built = if built == "" then part else `{built}/{part}`
+		built = if built == "" or built == "/" then built .. part else `{built}/{part}`
 		if not fs.isDir(built) then
 			fs.writeDir(built)
 		end
@@ -75,19 +79,21 @@ end
 --[[
 	Parses and analyses, returning the schema or the bail describing why not.
 ]]
-local function attempt(path: string): (Analyze.Schema?, any)
+local function attempt(path: string): (Analyze.Schema?, any, Diagnostics.ReporterImpl?)
 	local source = fs.readFile(path)
+	local captured: Diagnostics.ReporterImpl? = nil
 
 	local ok, result = pcall(function()
 		local file, reporter = Parser.parseSource(path, source)
+		captured = reporter
 		return Analyze.run(file, reporter)
 	end)
 
 	if ok then
-		return result :: Analyze.Schema, nil
+		return result :: Analyze.Schema, nil, captured
 	end
 	if Diagnostics.isBail(result) then
-		return nil, result
+		return nil, result, captured
 	end
 
 	error(result, 0)
@@ -96,9 +102,21 @@ end
 --[[
 	Parses and analyses. Returns nil after printing diagnostics, so watch mode
 	can report an error and keep going rather than exiting.
+
+	Warnings are printed on the way past: the schema compiled, but something in
+	it will bite at runtime.
 ]]
 local function compile(path: string): Analyze.Schema?
-	local schema, bail = attempt(path)
+	local schema, bail, reporter = attempt(path)
+
+	if reporter then
+		local warnings = (reporter :: Diagnostics.ReporterImpl):renderWarnings()
+		if warnings then
+			print(warnings)
+			print("")
+		end
+	end
+
 	if schema then
 		return schema
 	end
@@ -115,25 +133,40 @@ end
 	change shape.
 ]]
 local function emitJson(path: string)
-	local schema, bail = attempt(path)
+	local schema, bail, reporter = attempt(path)
+
+	--[[
+		Both severities share one shape, so an editor can render them from a
+		single list and colour by `severity`.
+	]]
+	local function encode(diag: Diagnostics.Diagnostic, severity: string)
+		local span = diag.span
+		return {
+			severity = severity,
+			message = diag.message,
+			label = diag.label,
+			help = diag.help,
+			-- One-based, matching what editors expect to be handed.
+			line = if span then span.line else 1,
+			column = if span then span.col else 1,
+			length = if span then span.len else 1,
+		}
+	end
+
+	local warnings = {}
+	if reporter then
+		for _, diag in (reporter :: Diagnostics.ReporterImpl).warnings do
+			table.insert(warnings, encode(diag, "warning"))
+		end
+	end
 
 	if not schema then
 		local diagnostics = {}
 		for _, diag in (bail :: any).diagnostics :: { Diagnostics.Diagnostic } do
-			local span = diag.span
-			table.insert(diagnostics, {
-				severity = "error",
-				message = diag.message,
-				label = diag.label,
-				help = diag.help,
-				-- One-based, matching what editors expect to be handed.
-				line = if span then span.line else 1,
-				column = if span then span.col else 1,
-				length = if span then span.len else 1,
-			})
+			table.insert(diagnostics, encode(diag, "error"))
 		end
 
-		print(serde.encode("json", { ok = false, diagnostics = diagnostics }))
+		print(serde.encode("json", { ok = false, diagnostics = diagnostics, warnings = warnings }))
 		return
 	end
 
@@ -163,6 +196,7 @@ local function emitJson(path: string)
 	print(serde.encode("json", {
 		ok = true,
 		diagnostics = {},
+		warnings = warnings,
 		packets = packets,
 		opcodeBytes = found.opcodeBytes,
 		unreliableCap = found.config.unreliableCap,

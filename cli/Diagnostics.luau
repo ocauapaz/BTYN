@@ -35,6 +35,9 @@ export type Reporter = {
 	file: string,
 	lines: { string },
 	diagnostics: { Diagnostic },
+	-- Reported alongside a successful compile. A warning never blocks output:
+	-- it flags a schema that compiles but is asking for trouble at runtime.
+	warnings: { Diagnostic },
 }
 
 -- Thrown by `fatal`. `main` catches this to print the rendered message instead
@@ -51,6 +54,7 @@ export type Bail = {
 local RESET = "\27[0m"
 local BOLD = "\27[1m"
 local RED = "\27[31m"
+local YELLOW = "\27[33m"
 local BLUE = "\27[34m"
 local CYAN = "\27[36m"
 
@@ -91,16 +95,19 @@ function Diagnostics.new(file: string, source: string): ReporterImpl
 		file = file,
 		lines = splitLines(source),
 		diagnostics = {},
+		warnings = {},
 	} :: Reporter, Reporter)
 end
 
 --[[
 	Renders one diagnostic to a printable string.
 ]]
-function Reporter.render(self: ReporterImpl, diag: Diagnostic): string
+function Reporter.render(self: ReporterImpl, diag: Diagnostic, severity: string?): string
 	local out = {}
+	local level = severity or "error"
+	local colour = if level == "warning" then YELLOW else RED
 
-	table.insert(out, paint(BOLD .. RED, "error") .. paint(BOLD, ": " .. diag.message))
+	table.insert(out, paint(BOLD .. colour, level) .. paint(BOLD, ": " .. diag.message))
 
 	local span = diag.span
 	if span then
@@ -117,7 +124,7 @@ function Reporter.render(self: ReporterImpl, diag: Diagnostic): string
 		local prefix = string.gsub(string.sub(lineText, 1, span.col - 1), "[^\t]", " ")
 		local caret = string.rep("^", math.max(span.len, 1))
 		local label = if diag.label then " " .. diag.label else ""
-		table.insert(out, pad .. paint(BLUE, " | ") .. prefix .. paint(BOLD .. RED, caret .. label))
+		table.insert(out, pad .. paint(BLUE, " | ") .. prefix .. paint(BOLD .. colour, caret .. label))
 		table.insert(out, pad .. paint(BLUE, " |"))
 	end
 
@@ -151,6 +158,29 @@ end
 
 function Reporter.hasErrors(self: ReporterImpl): boolean
 	return #self.diagnostics > 0
+end
+
+--[[
+	Collects a warning. Output is still written; the schema is legal but the
+	runtime behaviour it asks for is probably not what was meant.
+]]
+function Reporter.warn(self: ReporterImpl, diag: Diagnostic)
+	table.insert(self.warnings, diag)
+end
+
+--[[
+	Renders every warning collected, or nil when there are none.
+]]
+function Reporter.renderWarnings(self: ReporterImpl): string?
+	if #self.warnings == 0 then
+		return nil
+	end
+
+	local parts = {}
+	for _, diag in self.warnings do
+		table.insert(parts, self:render(diag, "warning"))
+	end
+	return table.concat(parts, "\n\n")
 end
 
 --[[

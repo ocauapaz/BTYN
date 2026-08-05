@@ -184,24 +184,38 @@ export type PacketCodec = {
 }
 
 --[[
+	The codecs one packet needs: its body, plus a reply body for a request.
+]]
+function Module.packetCodecs(packet: Analyze.Packet): { PacketCodec }
+	local list: { PacketCodec } = {
+		{
+			packet = packet,
+			suffix = "",
+			body = packet.body,
+			typeName = packet.name,
+		},
+	}
+
+	if packet.reply then
+		table.insert(list, {
+			packet = packet,
+			suffix = "Reply",
+			body = packet.reply :: Analyze.Body,
+			typeName = `{packet.name}Reply`,
+		})
+	end
+
+	return list
+end
+
+--[[
 	Every codec a schema needs, flattened: one per event, two per request.
 ]]
 function Module.codecs(schema: Analyze.Schema): { PacketCodec }
 	local list: { PacketCodec } = {}
 	for _, packet in schema.packets do
-		table.insert(list, {
-			packet = packet,
-			suffix = "",
-			body = packet.body,
-			typeName = packet.name,
-		})
-		if packet.reply then
-			table.insert(list, {
-				packet = packet,
-				suffix = "Reply",
-				body = packet.reply :: Analyze.Body,
-				typeName = `{packet.name}Reply`,
-			})
+		for _, codec in Module.packetCodecs(packet) do
+			table.insert(list, codec)
 		end
 	end
 	return list
