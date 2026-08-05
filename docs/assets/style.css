@@ -9,6 +9,12 @@
 	--accent-soft: #f0edff;
 	--yellow: #f2d300;
 	--purple: #8570ff;
+
+	/* Syntax tones, darkened for contrast against the light code surface. */
+	--kw-fn: #9a6700;
+	--kw-str: #1a7f4b;
+	--kw-num: #a54d1e;
+	--kw-lit: #0550ae;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -21,7 +27,14 @@
 		--accent: #a898ff;
 		--accent-soft: #211d38;
 		--yellow: #fff046;
-		--purple: #8570ff;
+		--purple: #a898ff;
+
+		/* Function names take the logo yellow here — it is the one place the
+		   brand colour is legible as text. */
+		--kw-fn: #ffd94a;
+		--kw-str: #7ddba6;
+		--kw-num: #f0a878;
+		--kw-lit: #79c0ff;
 	}
 }
 
@@ -186,17 +199,19 @@ pre {
 }
 pre code { background: none; padding: 0; }
 
-/* BTYN schema highlighting, applied by the layout script. */
-.btyn .k   { color: var(--purple); font-weight: 600; }
-.btyn .t   { color: var(--fg); font-weight: 600; }
-.btyn .m   { color: var(--purple); }
-.btyn .v   { color: var(--accent); }
-.btyn .ty  { color: var(--accent); }
-.btyn .f   { color: var(--fg); }
-.btyn .n   { color: var(--accent); }
-.btyn .o   { color: var(--muted); }
-.btyn .c   { color: var(--muted); font-style: italic; }
-.btyn .str { color: var(--accent); }
+/* Applied by assets/highlight.js — Rouge ships no lexer for btyn or luau. */
+.hl .k   { color: var(--purple); font-weight: 600; }  /* keyword */
+.hl .t   { color: var(--fg); font-weight: 600; }      /* declared type name */
+.hl .m   { color: var(--purple); }                    /* modifier */
+.hl .v   { color: var(--kw-lit); }                    /* literal: client, nil, true */
+.hl .ty  { color: var(--accent); }                    /* type reference */
+.hl .f   { color: var(--fg); }                        /* field name */
+.hl .fn  { color: var(--kw-fn); }                     /* function name */
+.hl .ns  { color: var(--fg); }                        /* namespace before a call */
+.hl .n   { color: var(--kw-num); }                    /* number */
+.hl .o   { color: var(--muted); }                     /* operator */
+.hl .c   { color: var(--muted); font-style: italic; } /* comment */
+.hl .str { color: var(--kw-str); }                    /* string */
 
 /* Tables */
 table {
