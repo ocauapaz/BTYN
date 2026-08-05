@@ -1,0 +1,157 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "BTYN",
+  "scopeName": "source.btyn",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#config" },
+    { "include": "#enum" },
+    { "include": "#declaration" },
+    { "include": "#modifiers" },
+    { "include": "#field" },
+    { "include": "#types" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.block.btyn",
+          "begin": "--\\[\\[",
+          "end": "\\]\\]",
+          "beginCaptures": { "0": { "name": "punctuation.definition.comment.btyn" } },
+          "endCaptures": { "0": { "name": "punctuation.definition.comment.btyn" } }
+        },
+        {
+          "name": "comment.line.double-dash.btyn",
+          "begin": "--",
+          "end": "$",
+          "beginCaptures": { "0": { "name": "punctuation.definition.comment.btyn" } }
+        }
+      ]
+    },
+
+    "config": {
+      "comment": "The config block has its own key vocabulary, so it gets its own scope rather than leaking those names into the rest of the file.",
+      "begin": "\\b(config)\\s*(\\{)",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.config.btyn" },
+        "2": { "name": "punctuation.section.block.begin.btyn" }
+      },
+      "end": "\\}",
+      "endCaptures": { "0": { "name": "punctuation.section.block.end.btyn" } },
+      "patterns": [
+        { "include": "#comments" },
+        {
+          "match": "\\b(server|client|types|typescript|budget|unreliable_cap|manual|runtime|write_checks|request_timeout)\\b",
+          "name": "support.type.property-name.btyn"
+        },
+        { "match": "\\b(true|false)\\b", "name": "constant.language.boolean.btyn" },
+        { "include": "#strings" },
+        { "include": "#numbers" },
+        { "match": "=", "name": "keyword.operator.assignment.btyn" },
+        { "match": "\\b[A-Za-z_]\\w*\\b", "name": "invalid.deprecated.unknown-config-key.btyn" }
+      ]
+    },
+
+    "enum": {
+      "comment": "Variants carry no colon, so without a dedicated block they would be mistaken for type references.",
+      "begin": "\\b(enum)\\s+([A-Za-z_]\\w*)\\s*(\\{)",
+      "beginCaptures": {
+        "1": { "name": "keyword.declaration.enum.btyn" },
+        "2": { "name": "entity.name.type.enum.btyn" },
+        "3": { "name": "punctuation.section.block.begin.btyn" }
+      },
+      "end": "\\}",
+      "endCaptures": { "0": { "name": "punctuation.section.block.end.btyn" } },
+      "patterns": [
+        { "include": "#comments" },
+        { "match": "\\b[A-Za-z_]\\w*\\b", "name": "constant.other.enum.btyn" },
+        { "match": ",", "name": "punctuation.separator.comma.btyn" }
+      ]
+    },
+
+    "declaration": {
+      "comment": "Matched with a following name so a field called `event` or `struct` stays a field.",
+      "match": "\\b(event|unreliable|request|channel|struct)\\s+([A-Za-z_]\\w*)",
+      "captures": {
+        "1": { "name": "keyword.declaration.btyn" },
+        "2": { "name": "entity.name.type.btyn" }
+      }
+    },
+
+    "modifiers": {
+      "comment": "Each modifier requires what legally follows it, so `rate: u8` and `from: u8` stay ordinary fields.",
+      "patterns": [
+        {
+          "match": "\\b(from)\\s+(client|server)\\b",
+          "captures": {
+            "1": { "name": "keyword.other.modifier.btyn" },
+            "2": { "name": "constant.language.direction.btyn" }
+          }
+        },
+        {
+          "match": "\\b(rate)\\s+(?=\\d)",
+          "captures": { "1": { "name": "keyword.other.modifier.btyn" } }
+        },
+        {
+          "match": "\\b(priority)\\s+(low|normal|high)\\b",
+          "captures": {
+            "1": { "name": "keyword.other.modifier.btyn" },
+            "2": { "name": "constant.language.priority.btyn" }
+          }
+        }
+      ]
+    },
+
+    "field": {
+      "match": "\\b([A-Za-z_]\\w*)\\s*(:)",
+      "captures": {
+        "1": { "name": "variable.other.member.btyn" },
+        "2": { "name": "punctuation.separator.key-value.btyn" }
+      }
+    },
+
+    "types": {
+      "patterns": [
+        {
+          "match": "\\b(u8|u16|u32|i8|i16|i32|f32|f64|bool|entity|vec3|cframe|color3|unit|angle|string|fixed|Instance)\\b",
+          "name": "support.type.primitive.btyn"
+        },
+        {
+          "comment": "Anything else capitalised is a struct or enum declared elsewhere in the file.",
+          "match": "\\b([A-Z]\\w*)\\b",
+          "name": "entity.name.type.btyn"
+        }
+      ]
+    },
+
+    "strings": {
+      "name": "string.quoted.double.btyn",
+      "begin": "\"",
+      "end": "\"",
+      "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.btyn" } },
+      "endCaptures": { "0": { "name": "punctuation.definition.string.end.btyn" } },
+      "patterns": [{ "match": "\\\\.", "name": "constant.character.escape.btyn" }]
+    },
+
+    "numbers": {
+      "match": "-?\\b\\d+(\\.\\d+)?\\b",
+      "name": "constant.numeric.btyn"
+    },
+
+    "operators": {
+      "patterns": [
+        { "match": "->", "name": "keyword.operator.reply.btyn" },
+        { "match": "\\.\\.", "name": "keyword.operator.range.btyn" },
+        { "match": "\\?", "name": "keyword.operator.optional.btyn" },
+        { "match": "[;,]", "name": "punctuation.separator.comma.btyn" },
+        { "match": "[{}]", "name": "punctuation.section.block.btyn" },
+        { "match": "[\\[\\]]", "name": "punctuation.section.brackets.btyn" },
+        { "match": "[()]", "name": "punctuation.section.parens.btyn" }
+      ]
+    }
+  }
+}

@@ -1,0 +1,100 @@
+{
+  "config block": {
+    "prefix": "config",
+    "body": [
+      "config {",
+      "\tserver = \"${1:src/Server/Net.luau}\"",
+      "\tclient = \"${2:src/Client/Net.luau}\"",
+      "}"
+    ],
+    "description": "Output paths and compiler options"
+  },
+
+  "reliable event": {
+    "prefix": "event",
+    "body": [
+      "event ${1:Name} from ${2|client,server|} {",
+      "\t${3:field}: ${4:u8},",
+      "}"
+    ],
+    "description": "Reliable, ordered, batched once per frame"
+  },
+
+  "rate limited event": {
+    "prefix": "eventrate",
+    "body": [
+      "event ${1:Name} from client rate ${2:10} {",
+      "\t${3:field}: ${4:u8},",
+      "}"
+    ],
+    "description": "Client-to-server event with a per-player token bucket"
+  },
+
+  "unreliable event": {
+    "prefix": "unreliable",
+    "body": [
+      "unreliable ${1:Name} from ${2|server,client|} {",
+      "\t${3:field}: ${4:vec3},",
+      "}"
+    ],
+    "description": "May arrive out of order or not at all — use for anything a lost packet makes invisible"
+  },
+
+  "request": {
+    "prefix": "request",
+    "body": [
+      "request ${1:Name} from ${2|client,server|} {",
+      "\t${3:field}: ${4:u16},",
+      "} -> {",
+      "\tok: bool,",
+      "}"
+    ],
+    "description": "Request and reply over the same two remotes"
+  },
+
+  "channel": {
+    "prefix": "channel",
+    "body": [
+      "channel ${1:Name} priority ${2|normal,high,low|} {",
+      "\t${3:field}: ${4:u8},",
+      "}"
+    ],
+    "description": "Delta-encoded replicated state with an explicit audience"
+  },
+
+  "struct": {
+    "prefix": "struct",
+    "body": ["struct ${1:Name} { ${2:x}: ${3:i16}, ${4:y}: ${5:i16} }"],
+    "description": "A reusable field group"
+  },
+
+  "enum": {
+    "prefix": "enum",
+    "body": ["enum ${1:Name} { ${2:First}, ${3:Second} }"],
+    "description": "One byte on the wire, a string union in Luau"
+  },
+
+  "capped string field": {
+    "prefix": "string",
+    "body": ["${1:name}: string(${2:24}),"],
+    "description": "The cap is mandatory — an uncapped string is an uncapped packet"
+  },
+
+  "capped array field": {
+    "prefix": "array",
+    "body": ["${1:name}: [${2:u16}; ${3:100}],"],
+    "description": "The cap is mandatory"
+  },
+
+  "ranged field": {
+    "prefix": "ranged",
+    "body": ["${1:name}: ${2:u8}(${3:0}..${4:100}),"],
+    "description": "Validated on both sides"
+  },
+
+  "quantised float field": {
+    "prefix": "fixed",
+    "body": ["${1:name}: fixed(${2:-1}, ${3:1}, ${4:2}),"],
+    "description": "A float quantised into a fixed range — usually the right answer instead of f32"
+  }
+}

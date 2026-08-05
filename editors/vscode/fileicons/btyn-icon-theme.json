@@ -1,0 +1,24 @@
+{
+  "//": "A file icon theme replaces the active one wholesale — VS Code has no additive file-icon API, so an extension cannot inject a single icon into someone else's theme. This theme is therefore deliberately minimal: the BTYN logo on .btyn, and neutral fallbacks for everything else. If you already run an icon theme you like, use scripts/patch-icon-theme.js instead and keep it.",
+
+  "iconDefinitions": {
+    "_btyn": { "iconPath": "./icons/btyn.svg" },
+    "_file": { "iconPath": "./icons/_file.svg" },
+    "_folder": { "iconPath": "./icons/_folder.svg" },
+    "_folder_open": { "iconPath": "./icons/_folder_open.svg" }
+  },
+
+  "file": "_file",
+  "folder": "_folder",
+  "folderExpanded": "_folder_open",
+  "rootFolder": "_folder",
+  "rootFolderExpanded": "_folder_open",
+
+  "fileExtensions": {
+    "btyn": "_btyn"
+  },
+
+  "languageIds": {
+    "btyn": "_btyn"
+  }
+}

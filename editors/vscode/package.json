@@ -1,0 +1,96 @@
+{
+  "name": "btyn",
+  "displayName": "BTYN",
+  "description": "Syntax highlighting for BTYN networking schemas (.btyn)",
+  "version": "0.1.0",
+  "publisher": "btyn",
+  "license": "MIT",
+  "icon": "icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ocauapaz/BTYN.git",
+    "directory": "editors/vscode"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets"
+  ],
+  "main": "./src/extension.js",
+  "activationEvents": [
+    "onLanguage:btyn"
+  ],
+  "scripts": {
+    "test": "node test/grammar.test.js && node test/language.test.js",
+    "patch-icon-theme": "node scripts/patch-icon-theme.js",
+    "unpatch-icon-theme": "node scripts/patch-icon-theme.js --undo"
+  },
+  "devDependencies": {
+    "vscode-oniguruma": "^2.0.1",
+    "vscode-textmate": "^9.0.0"
+  },
+  "keywords": [
+    "btyn",
+    "roblox",
+    "luau",
+    "networking",
+    "schema"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "btyn",
+        "aliases": [
+          "BTYN",
+          "btyn"
+        ],
+        "extensions": [
+          ".btyn"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "btyn",
+        "scopeName": "source.btyn",
+        "path": "./syntaxes/btyn.tmLanguage.json"
+      }
+    ],
+    "iconThemes": [
+      {
+        "id": "btyn",
+        "label": "BTYN",
+        "path": "./fileicons/btyn-icon-theme.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "btyn",
+        "path": "./snippets/btyn.json"
+      }
+    ],
+    "configuration": {
+      "title": "BTYN",
+      "properties": {
+        "btyn.diagnostics.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Report schema errors inline by running the compiler as you type."
+        },
+        "btyn.lunePath": {
+          "type": "string",
+          "default": "lune",
+          "description": "Path to the Lune executable that runs the compiler."
+        },
+        "btyn.compilerPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to cli/main.luau. Left empty, the nearest one above the open file is used."
+        }
+      }
+    }
+  }
+}

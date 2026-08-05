@@ -1,0 +1,5 @@
+<!-- Neutral fallback for everything that is not a .btyn schema. -->
+<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M4 1.5h5L12.5 5v9.5h-8.5z" fill="none" stroke="#8b8b8b" stroke-width="1.2" stroke-linejoin="round"/>
+  <path d="M9 1.5V5h3.5" fill="none" stroke="#8b8b8b" stroke-width="1.2" stroke-linejoin="round"/>
+</svg>

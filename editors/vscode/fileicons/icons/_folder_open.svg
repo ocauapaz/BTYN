@@ -1,0 +1,5 @@
+<!-- Neutral fallback folder, expanded. -->
+<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M1.5 13.5v-10h4l1.5 2h6v2" fill="none" stroke="#8b8b8b" stroke-width="1.2" stroke-linejoin="round"/>
+  <path d="M1.5 13.5l2.5-6h11l-2.5 6z" fill="none" stroke="#8b8b8b" stroke-width="1.2" stroke-linejoin="round"/>
+</svg>
