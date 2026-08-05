@@ -23,5 +23,6 @@ require("./codec.spec")
 require("./emit.spec")
 require("./channel.spec")
 require("./runtime.spec")
+require("./transport.spec")
 
 process.exit(harness.run())
