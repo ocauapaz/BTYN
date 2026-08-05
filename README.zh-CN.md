@@ -88,7 +88,9 @@ BTYN 就是这个做法的自动生成版本。整个游戏只用两个 remote�
 rokit install
 ```
 
-把 `src/` 作为名为 `BTYN` 的模块放进你的游戏，写好 schema，然后编译：
+把 `src/` 作为名为 `BTYN` 的模块放进你的游戏 —— `default.project.json` 会把它映射到
+`ReplicatedStorage.BTYN`，这也是生成代码默认查找的位置，除非你把 schema 的 `runtime`
+键指向别处。然后写好 schema，编译：
 
 ```bash
 lune run cli/main -- net.btyn
@@ -122,6 +124,22 @@ btyn: net.btyn is valid — 9 packet(s), 1 byte opcodes
 ```bash
 cd editors/vscode && npx @vscode/vsce package --skip-license && code --install-extension btyn-0.1.0.vsix
 ```
+
+它尚未发布到 Marketplace，因此需要从仓库打包安装。
+
+## 文档
+
+完整文档提供英文和葡萄牙文两个版本：
+
+| | |
+|---|---|
+| [Getting started](https://ocauapaz.github.io/BTYN/en/) | 安装、runtime 放在哪里、第一个 schema |
+| [Schema language](https://ocauapaz.github.io/BTYN/en/schema) | 声明、类型、config 键 |
+| [Generated API](https://ocauapaz.github.io/BTYN/en/api) | 每一侧分别调用什么 |
+| [Compiler and editor](https://ocauapaz.github.io/BTYN/en/cli) | 命令行参数、watch 模式、VS Code |
+| [Performance](https://ocauapaz.github.io/BTYN/en/performance) | 引擎的限制，以及如何应对 |
+| [Security](https://ocauapaz.github.io/BTYN/en/security) | buffer 能保护什么，不能保护什么 |
+| [Troubleshooting](https://ocauapaz.github.io/BTYN/en/troubleshooting) | 出问题的时候 |
 
 ## 安全性
 

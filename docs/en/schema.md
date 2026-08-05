@@ -155,6 +155,20 @@ you catching `hp = 300` at the call site instead of watching it silently
 truncate to 44 and arrive as a mystery. Leave it on until a profile says
 otherwise.
 
+On `max_packets_per_batch`: the smallest packet on the wire is a single opcode
+byte, so without a ceiling one payload from a hostile client becomes tens of
+thousands of handler calls in a frame — an amplification the per-packet `rate`
+limits cannot see, because they are only reached once the work has been done.
+The default is far above ordinary play, where a busy frame of input is a handful
+of packets. It applies to what the **server receives** and never to the server's
+own batches, which legitimately run long: one channel keyframe per replicated
+entity is one packet each.
+
+On `manual`: with it set, nothing flushes on its own and `Net.flush()` is yours
+to call. The per-frame channel budget follows real elapsed time rather than
+assuming sixty flushes a second, so an unusual cadence still spends `budget`
+bytes per second rather than sixty times too many.
+
 ## Types
 
 ### Numbers
@@ -239,4 +253,4 @@ batch that holds them.
 
 ---
 
-Next: [the generated API](api.md) · [performance](performance.md) · [security](security.md)
+Next: [the generated API](api.md) · [compiler and editor](cli.md) · [performance](performance.md) · [security](security.md)

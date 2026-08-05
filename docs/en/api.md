@@ -63,6 +63,42 @@ Net.Damaged.on(function(data) end)
 
 One handler per packet; registering again replaces it.
 
+### How handlers run
+
+Every handler — events, channels, requests — is resumed on **its own thread**.
+Two consequences worth knowing:
+
+**You may yield.** A datastore call or a `task.wait` in a handler holds up
+nothing else. The packets behind it in the same batch keep being delivered.
+
+**An error is contained.** A handler that throws does not discard the rest of
+the batch, and is not misreported through `onAbuse` as the sender's fault. It
+surfaces as an ordinary script error.
+
+The trade is that two handlers from the same batch have no completion order if
+the first one yields. If a pair of packets is only safe in sequence — a charge
+and its release — validate before you yield, or carry the ordering in the
+payload rather than relying on arrival order.
+
+### What the schema does not check
+
+The shape is validated before your handler runs: ranges, lengths, finiteness,
+enum variants, and that an `Instance` field really holds one. What it cannot
+check is meaning.
+
+`entity` in particular is a bare `u32` naming something your game owns. Any
+value fits, so every id from a client is a claim to verify:
+
+```luau
+Net.Attack.on(function(player, data)
+    local target = entities[data.target]     -- exists?
+    if not target or not canReach(player, target) then
+        return                               -- theirs to touch?
+    end
+    ...
+end)
+```
+
 ## Requests
 
 ```btyn
@@ -85,11 +121,17 @@ Net.Buy.on(function(player, request)
 end)
 ```
 
-The handler runs on its own thread, so yielding in it — a datastore call, a
-`task.wait` — does not hold up anything else in the batch.
+Returning `nil` rejects, and so does throwing — the handler runs inside a
+`pcall`, so an error reaches the caller as a failure rather than a timeout.
 
 For a `request X from server`, the direction flips and the server's `call` takes
-a target: `Net.Ping.call(player, data)`.
+a target: `Net.Ping.call(player, data)`. A reply is only accepted from the
+player it was sent to, so one client cannot answer a question the server asked
+somebody else.
+
+Every request carries a deadline (`request_timeout`, default 10s). A reply that
+never arrives fails the call rather than stranding the thread, and one that
+arrives after the deadline is dropped rather than delivered late.
 
 ## Channels
 
@@ -168,8 +210,9 @@ consider it a signal.
 
 Rate limits are declared in the schema (`rate 10`) and enforced on the receiving
 side, per player, with a token bucket. An over-budget packet is dropped and
-reported, never queued.
+reported, never queued. The bucket holds one second of budget, so `rate 10`
+allows a burst of ten and refills at ten per second.
 
 ---
 
-Next: [performance](performance.md) · [security](security.md) · [schema reference](schema.md)
+Next: [troubleshooting](troubleshooting.md) · [performance](performance.md) · [security](security.md) · [schema reference](schema.md)

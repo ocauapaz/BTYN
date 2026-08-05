@@ -64,6 +64,43 @@ Net.Damaged.on(function(data) end)
 
 Um handler por pacote; registrar de novo substitui o anterior.
 
+### Como os handlers rodam
+
+Todo handler — de evento, de channel, de request — é retomado numa **thread
+própria**. Duas consequências valem saber:
+
+**Você pode dar yield.** Uma chamada de datastore ou um `task.wait` dentro do
+handler não segura mais nada. Os pacotes atrás dele no mesmo batch continuam
+sendo entregues.
+
+**Um erro fica contido.** Um handler que lança não descarta o resto do batch, e
+não é reportado erroneamente pelo `onAbuse` como culpa de quem enviou. Ele
+aparece como um erro de script comum.
+
+O preço é que dois handlers do mesmo batch não têm ordem de conclusão se o
+primeiro der yield. Se um par de pacotes só é seguro em sequência — um
+carregamento e sua liberação — valide antes de ceder, ou carregue a ordem no
+payload em vez de depender da ordem de chegada.
+
+### O que o schema não verifica
+
+O formato é validado antes do seu handler rodar: faixas, tamanhos, finitude,
+variantes de enum, e que um campo `Instance` realmente contenha uma. O que ele
+não consegue verificar é significado.
+
+`entity` em especial é um `u32` puro nomeando algo que o seu jogo possui.
+Qualquer valor cabe, então todo id vindo do cliente é uma afirmação a conferir:
+
+```luau
+Net.Attack.on(function(player, data)
+    local target = entities[data.target]     -- existe?
+    if not target or not canReach(player, target) then
+        return                               -- é dele para mexer?
+    end
+    ...
+end)
+```
+
 ## Requests
 
 ```btyn
@@ -86,11 +123,17 @@ Net.Buy.on(function(player, request)
 end)
 ```
 
-O handler roda na própria thread, então dar yield ali — uma chamada de
-datastore, um `task.wait` — não segura nada do resto do batch.
+Retornar `nil` rejeita, e lançar erro também — o handler roda dentro de um
+`pcall`, então um erro chega a quem chamou como falha e não como timeout.
 
 Para um `request X from server` a direção inverte e o `call` do servidor recebe
-um alvo: `Net.Ping.call(player, data)`.
+um alvo: `Net.Ping.call(player, data)`. Uma resposta só é aceita do jogador para
+quem o request foi enviado, então um cliente não consegue responder uma pergunta
+que o servidor fez a outra pessoa.
+
+Toda requisição carrega um prazo (`request_timeout`, 10s por padrão). Uma
+resposta que nunca chega faz a chamada falhar em vez de deixar a thread presa, e
+uma que chega depois do prazo é descartada em vez de entregue atrasada.
 
 ## Channels
 
@@ -169,8 +212,9 @@ escreveu os dois lados. É um sinal forte, vale logar e vale agir.
 
 Rate limits são declarados no schema (`rate 10`) e aplicados no lado que recebe,
 por jogador, com token bucket. Um pacote acima do orçamento é descartado e
-reportado, nunca enfileirado.
+reportado, nunca enfileirado. O bucket guarda um segundo de orçamento, então
+`rate 10` permite uma rajada de dez e reabastece a dez por segundo.
 
 ---
 
-Próximo: [performance](performance.md) · [segurança](security.md) · [referência do schema](schema.md)
+Próximo: [resolvendo problemas](troubleshooting.md) · [performance](performance.md) · [segurança](security.md) · [referência do schema](schema.md)

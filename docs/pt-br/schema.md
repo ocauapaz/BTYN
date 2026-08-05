@@ -160,6 +160,20 @@ compra pegar `hp = 300` no ponto da chamada em vez de vê-lo truncar em silênci
 para 44 e chegar do outro lado como um mistério. Deixe ligado até um profile
 dizer o contrário.
 
+Sobre `max_packets_per_batch`: o menor pacote no fio é um único byte de opcode,
+então sem um teto um payload de um cliente hostil vira dezenas de milhares de
+chamadas de handler num frame — uma amplificação que os limites de `rate` por
+pacote não enxergam, porque só são alcançados depois que o trabalho já foi
+feito. O padrão fica muito acima do jogo normal, onde um frame movimentado de
+input são alguns poucos pacotes. Vale para o que o **servidor recebe** e nunca
+para os batches do próprio servidor, que legitimamente são longos: um keyframe
+de channel por entidade replicada é um pacote cada.
+
+Sobre `manual`: com ele ligado, nada é enviado sozinho e o `Net.flush()` fica por
+sua conta. O orçamento de bytes por frame dos channels acompanha o tempo real
+decorrido em vez de assumir sessenta flushes por segundo, então uma cadência
+diferente ainda gasta `budget` bytes por segundo em vez de sessenta vezes mais.
+
 ## Tipos
 
 ### Números
@@ -243,4 +257,4 @@ carrega.
 
 ---
 
-Próximo: [a API gerada](api.md) · [performance](performance.md) · [segurança](security.md)
+Próximo: [a API gerada](api.md) · [compilador e editor](cli.md) · [performance](performance.md) · [segurança](security.md)

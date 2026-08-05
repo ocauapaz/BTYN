@@ -186,4 +186,4 @@ all — a field that does not exist cannot be forged.
 
 ---
 
-Next: [schema reference](schema.md) · [API](api.md) · [performance](performance.md)
+Next: [schema reference](schema.md) · [API](api.md) · [troubleshooting](troubleshooting.md) · [performance](performance.md)

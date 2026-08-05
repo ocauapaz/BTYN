@@ -94,11 +94,18 @@ both pinned in `rokit.toml`:
 rokit install
 ```
 
-Put `src/` into your game as a module named `BTYN`, write a schema, and compile:
+Put `src/` into your game as a module named `BTYN` — `default.project.json` maps
+it to `ReplicatedStorage.BTYN`, which is where the generated code looks unless
+you point the schema's `runtime` key somewhere else. Then write a schema and
+compile:
 
 ```bash
 lune run cli/main -- net.btyn
 ```
+
+The `[0    ]` column below is the opcode; a request and a channel take two each.
+Both output paths come from the schema's own `config` block, so the command
+never changes as the project grows.
 
 Inspect it without writing anything — sizes, opcodes, and how close your largest
 unreliable packet sits to the cap:
@@ -130,6 +137,24 @@ compiler itself:
 ```bash
 cd editors/vscode && npx @vscode/vsce package --skip-license && code --install-extension btyn-0.1.0.vsix
 ```
+
+It is not on the Marketplace yet, so it is built from the repository. Settings
+and the full flag reference are in
+[compiler and editor](https://ocauapaz.github.io/BTYN/en/cli).
+
+## Documentation
+
+| | |
+|---|---|
+| [Getting started](https://ocauapaz.github.io/BTYN/en/) | Install, runtime placement, first schema |
+| [Schema language](https://ocauapaz.github.io/BTYN/en/schema) | Declarations, types, config keys |
+| [Generated API](https://ocauapaz.github.io/BTYN/en/api) | What you call on each side |
+| [Compiler and editor](https://ocauapaz.github.io/BTYN/en/cli) | Flags, watch mode, VS Code |
+| [Performance](https://ocauapaz.github.io/BTYN/en/performance) | The engine's limits and what to do about them |
+| [Security](https://ocauapaz.github.io/BTYN/en/security) | What buffers do and do not protect |
+| [Troubleshooting](https://ocauapaz.github.io/BTYN/en/troubleshooting) | When something does not work |
+
+Also in [Português](https://ocauapaz.github.io/BTYN/pt-br/).
 
 ## Security
 

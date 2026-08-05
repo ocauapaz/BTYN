@@ -95,8 +95,10 @@ ambos fijados en `rokit.toml`:
 rokit install
 ```
 
-Pon `src/` en tu juego como un módulo llamado `BTYN`, escribe un esquema y
-compila:
+Pon `src/` en tu juego como un módulo llamado `BTYN` — `default.project.json` lo
+mapea a `ReplicatedStorage.BTYN`, que es donde el código generado lo busca, a
+menos que apuntes la clave `runtime` del esquema a otro lugar. Después escribe
+un esquema y compila:
 
 ```bash
 lune run cli/main -- net.btyn
@@ -132,6 +134,22 @@ diagnósticos en vivo del propio compilador:
 ```bash
 cd editors/vscode && npx @vscode/vsce package --skip-license && code --install-extension btyn-0.1.0.vsix
 ```
+
+Todavía no está en el Marketplace, por eso se empaqueta desde el repositorio.
+
+## Documentación
+
+La documentación completa está en inglés y portugués:
+
+| | |
+|---|---|
+| [Getting started](https://ocauapaz.github.io/BTYN/en/) | Instalación, dónde va el runtime, primer esquema |
+| [Schema language](https://ocauapaz.github.io/BTYN/en/schema) | Declaraciones, tipos, claves de config |
+| [Generated API](https://ocauapaz.github.io/BTYN/en/api) | Qué llamas en cada lado |
+| [Compiler and editor](https://ocauapaz.github.io/BTYN/en/cli) | Flags, watch mode, VS Code |
+| [Performance](https://ocauapaz.github.io/BTYN/en/performance) | Los límites del motor y qué hacer con ellos |
+| [Security](https://ocauapaz.github.io/BTYN/en/security) | Qué protegen los buffers y qué no |
+| [Troubleshooting](https://ocauapaz.github.io/BTYN/en/troubleshooting) | Cuando algo no funciona |
 
 ## Seguridad
 

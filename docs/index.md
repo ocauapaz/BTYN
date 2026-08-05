@@ -33,8 +33,10 @@ channel Health priority high {
 <li><a href="{{ site.baseurl }}/en/"><strong>Getting started</strong><span>Install, write a schema, compile it.</span></a></li>
 <li><a href="{{ site.baseurl }}/en/schema/"><strong>Schema language</strong><span>Declarations, types, config.</span></a></li>
 <li><a href="{{ site.baseurl }}/en/api/"><strong>Generated API</strong><span>What you call on each side.</span></a></li>
+<li><a href="{{ site.baseurl }}/en/cli/"><strong>Compiler and editor</strong><span>Flags, watch mode, VS Code.</span></a></li>
 <li><a href="{{ site.baseurl }}/en/performance/"><strong>Performance</strong><span>The engine's limits, and what to do about them.</span></a></li>
 <li><a href="{{ site.baseurl }}/en/security/"><strong>Security</strong><span>What buffers do and do not protect.</span></a></li>
+<li><a href="{{ site.baseurl }}/en/troubleshooting/"><strong>Troubleshooting</strong><span>When something does not work.</span></a></li>
 <li><a href="{{ site.baseurl }}/pt-br/"><strong>Português</strong><span>Documentação completa em português.</span></a></li>
 </ul>
 

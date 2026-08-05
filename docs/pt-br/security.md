@@ -188,4 +188,4 @@ pacote. Se um valor pode ser derivado no servidor, ele não deveria estar no fio
 
 ---
 
-Próximo: [referência do schema](schema.md) · [API](api.md) · [performance](performance.md)
+Próximo: [referência do schema](schema.md) · [API](api.md) · [resolvendo problemas](troubleshooting.md) · [performance](performance.md)

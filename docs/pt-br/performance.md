@@ -166,4 +166,4 @@ Se for medir:
 
 ---
 
-Próximo: [segurança](security.md) · [referência do schema](schema.md) · [API](api.md)
+Próximo: [segurança](security.md) · [compilador e editor](cli.md) · [referência do schema](schema.md) · [API](api.md)

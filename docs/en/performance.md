@@ -162,4 +162,4 @@ If you benchmark:
 
 ---
 
-Next: [security](security.md) · [schema reference](schema.md) · [API](api.md)
+Next: [security](security.md) · [compiler and editor](cli.md) · [schema reference](schema.md) · [API](api.md)
