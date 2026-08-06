@@ -34,29 +34,40 @@ export type Config = {
 	-- Ceiling on how many packets one received batch may contain. Enforced on
 	-- the server only: see `consume`.
 	maxPacketsPerBatch: number,
+	-- Where the two remotes live, as a `/`-separated path under
+	-- ReplicatedStorage. Absent means `DEFAULT_REMOTES`. A project that keeps
+	-- its framework under one folder points this at it rather than having the
+	-- transport drop a folder at the root.
+	remotes: string?,
 }
 
 export type Handler = (player: Player?, b: buffer, offset: number, limit: number, refs: { Instance }?) -> number
 
-local REMOTE_FOLDER = "BTYN"
+local DEFAULT_REMOTES = "BTYN"
 local RELIABLE_NAME = "R"
 local UNRELIABLE_NAME = "U"
 
 --[[
 	Finds or creates the two remotes.
 
-	The server creates them; the client waits. Names are deliberately
-	uninformative — there is nothing to learn from reading them.
+	The server creates the path it is given, one folder per missing segment; the
+	client waits for each. Names are deliberately uninformative — there is
+	nothing to learn from reading them.
 ]]
-local function resolveRemotes(): (RemoteEvent, UnreliableRemoteEvent)
+local function resolveRemotes(remotes: string?): (RemoteEvent, UnreliableRemoteEvent)
 	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	local path = remotes or DEFAULT_REMOTES
 
 	if RunService:IsServer() then
-		local folder = ReplicatedStorage:FindFirstChild(REMOTE_FOLDER)
-		if not folder then
-			folder = Instance.new("Folder")
-			folder.Name = REMOTE_FOLDER
-			folder.Parent = ReplicatedStorage
+		local folder: Instance = ReplicatedStorage
+		for segment in string.gmatch(path, "[^/]+") do
+			local child = folder:FindFirstChild(segment)
+			if not child then
+				child = Instance.new("Folder")
+				;(child :: Instance).Name = segment
+				;(child :: Instance).Parent = folder
+			end
+			folder = child :: Instance
 		end
 
 		local reliable = folder:FindFirstChild(RELIABLE_NAME) :: RemoteEvent?
@@ -76,7 +87,10 @@ local function resolveRemotes(): (RemoteEvent, UnreliableRemoteEvent)
 		return reliable :: RemoteEvent, unreliable :: UnreliableRemoteEvent
 	end
 
-	local folder = ReplicatedStorage:WaitForChild(REMOTE_FOLDER)
+	local folder: Instance = ReplicatedStorage
+	for segment in string.gmatch(path, "[^/]+") do
+		folder = folder:WaitForChild(segment)
+	end
 	return folder:WaitForChild(RELIABLE_NAME) :: RemoteEvent, folder:WaitForChild(UNRELIABLE_NAME) :: UnreliableRemoteEvent
 end
 
@@ -111,7 +125,7 @@ export type Endpoint = {
 local WEAK_KEYS = { __mode = "k" }
 
 local function newEndpoint(config: Config): Endpoint
-	local reliable, unreliable = resolveRemotes()
+	local reliable, unreliable = resolveRemotes(config.remotes)
 	return {
 		config = config,
 		reliable = reliable,

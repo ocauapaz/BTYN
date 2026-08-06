@@ -89,6 +89,7 @@ local function emitEndpoint(w: Impl, schema: Analyze.Schema)
 	w:line(`budget = {schema.config.budget},`)
 	w:line(`manual = {tostring(schema.config.manual)},`)
 	w:line(`maxPacketsPerBatch = {schema.config.maxPacketsPerBatch},`)
+	w:line(`remotes = {string.format("%q", schema.config.remotes)},`)
 	w:pop("})")
 	w:line()
 end

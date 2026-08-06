@@ -78,19 +78,28 @@ local function fixture(isServer: boolean, overrides: { [string]: any }?): Fixtur
 	local reliable = newRemote("R")
 	local unreliable = newRemote("U")
 
-	local folder = {
-		children = { R = reliable, U = unreliable },
-	}
-	function folder.FindFirstChild(self: any, name: string): any
-		return self.children[name]
+	local function container(children: { [string]: any }): any
+		local node = { children = children }
+		function node.FindFirstChild(self: any, name: string): any
+			return self.children[name]
+		end
+		node.WaitForChild = node.FindFirstChild
+		return node
 	end
-	folder.WaitForChild = folder.FindFirstChild
 
-	local replicatedStorage = { children = { BTYN = folder } }
-	function replicatedStorage.FindFirstChild(self: any, name: string): any
-		return self.children[name]
+	local folder = container({ R = reliable, U = unreliable })
+
+	-- The remotes hang off the last segment of the configured path, so a nested
+	-- `remotes` gets a nested fixture and the walk has something to walk.
+	local segments = {}
+	for segment in string.gmatch((overrides and overrides.remotes) or "BTYN", "[^/]+") do
+		table.insert(segments, segment)
 	end
-	replicatedStorage.WaitForChild = replicatedStorage.FindFirstChild
+	local node = folder
+	for i = #segments, 2, -1 do
+		node = container({ [segments[i]] = node })
+	end
+	local replicatedStorage = container({ [segments[1]] = node })
 
 	local players = { list = {}, PlayerRemoving = newSignal() }
 	function players.GetPlayers(self: any): { any }
@@ -181,6 +190,29 @@ local function countingHandler(f: Fixture, opcode: number, reliable: boolean): (
 		return calls
 	end
 end
+
+t.suite("Transport — remote location")
+
+t.test("a nested `remotes` path is walked segment by segment", function()
+	-- A project that keeps its framework under one folder configures the path
+	-- rather than accepting a stray instance at the root. The fixture creates
+	-- no instances, so reaching the remotes at all proves the walk.
+	local f = fixture(true, { remotes = "NDF/BTYN" })
+	local calls = countingHandler(f, 0, true)
+
+	f.reliable.OnServerEvent:fire({ Name = "honest" }, emptyPackets(1))
+
+	t.eq(calls(), 1, "the endpoint should be wired to the nested remotes")
+end)
+
+t.test("the client walks the same nested path", function()
+	local f = fixture(false, { remotes = "NDF/BTYN" })
+	local calls = countingHandler(f, 0, true)
+
+	f.reliable.OnClientEvent:fire(emptyPackets(1))
+
+	t.eq(calls(), 1, "the client resolves through WaitForChild on every segment")
+end)
 
 t.suite("Transport — batch ceiling")
 

@@ -66,6 +66,10 @@ export type Config = {
 	maxPacketsPerBatch: number,
 	-- Luau expression the generated files use to reach the BTYN runtime.
 	runtime: string,
+	-- Where the two remotes live, as a `/`-separated path under
+	-- ReplicatedStorage. Points at an existing framework folder when the
+	-- project would rather not carry a stray instance at the root.
+	remotes: string,
 	-- Seconds before an unanswered request gives up.
 	requestTimeout: number,
 	-- Validate on the way out as well as on the way in. On by default: writing
@@ -94,11 +98,14 @@ local CONFIG_KEYS = {
 	"max_packets_per_batch",
 	"manual",
 	"runtime",
+	"remotes",
 	"write_checks",
 	"request_timeout",
 }
 
 local DEFAULT_RUNTIME = 'game:GetService("ReplicatedStorage"):WaitForChild("BTYN")'
+
+local DEFAULT_REMOTES = "BTYN"
 
 --[[
 	Conservative default for the UnreliableRemoteEvent payload cap.
@@ -131,6 +138,7 @@ local function defaultConfig(): Config
 		maxPacketsPerBatch = DEFAULT_MAX_PACKETS_PER_BATCH,
 		manual = false,
 		runtime = DEFAULT_RUNTIME,
+		remotes = DEFAULT_REMOTES,
 		writeChecks = true,
 		requestTimeout = 10,
 	}
@@ -238,6 +246,10 @@ local function readConfig(decls: { Ast.Decl }, reporter: ReporterImpl): Config
 			elseif entry.key == "runtime" then
 				if expectType(reporter, entry, "string") then
 					config.runtime = entry.value :: string
+				end
+			elseif entry.key == "remotes" then
+				if expectType(reporter, entry, "string") then
+					config.remotes = entry.value :: string
 				end
 			elseif entry.key == "write_checks" then
 				if expectType(reporter, entry, "boolean") then

@@ -142,6 +142,7 @@ config {
 | `server` | *obrigatório* | Onde escrever o módulo do servidor |
 | `client` | *obrigatório* | Onde escrever o módulo do cliente |
 | `runtime` | `game:GetService("ReplicatedStorage"):WaitForChild("BTYN")` | Expressão Luau que os arquivos gerados usam para achar o runtime |
+| `remotes` | `BTYN` | Onde ficam os dois remotes, caminho separado por `/` dentro de `ReplicatedStorage` |
 | `budget` | `40000` | Orçamento suave de saída por cliente, bytes/segundo |
 | `unreliable_cap` | `800` | Maior payload unreliable, em bytes |
 | `max_packets_per_batch` | `256` | Máximo de pacotes num batch recebido, no servidor |
