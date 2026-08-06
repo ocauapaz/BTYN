@@ -62,10 +62,11 @@ local function resolveRemotes(remotes: string?): (RemoteEvent, UnreliableRemoteE
 		local folder: Instance = ReplicatedStorage
 		for segment in string.gmatch(path, "[^/]+") do
 			local child = folder:FindFirstChild(segment)
-			if not child then
-				child = Instance.new("Folder")
-				;(child :: Instance).Name = segment
-				;(child :: Instance).Parent = folder
+			if child == nil then
+				local created = Instance.new("Folder")
+				created.Name = segment
+				created.Parent = folder
+				child = created
 			end
 			folder = child :: Instance
 		end
