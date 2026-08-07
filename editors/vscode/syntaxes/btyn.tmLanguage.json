@@ -45,7 +45,7 @@
       "patterns": [
         { "include": "#comments" },
         {
-          "match": "\\b(server|client|types|typescript|budget|unreliable_cap|max_packets_per_batch|manual|runtime|write_checks|request_timeout)\\b",
+          "match": "\\b(server|client|types|typescript|budget|unreliable_cap|max_packets_per_batch|manual|runtime|remotes|write_checks|request_timeout)\\b",
           "name": "support.type.property-name.btyn"
         },
         { "match": "\\b(true|false)\\b", "name": "constant.language.boolean.btyn" },
