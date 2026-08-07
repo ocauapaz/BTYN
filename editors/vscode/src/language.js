@@ -116,6 +116,10 @@ const CONFIG_KEYS = {
 		detail: "default: 256",
 		doc: "Most packets one received batch may carry, enforced on the server only.\n\nThe smallest packet is a single opcode byte, so without a ceiling one payload becomes tens of thousands of handler calls in a frame — an amplification the per-packet rate limits cannot see, because they are only reached once the work has already been done.",
 	},
+	remotes: {
+		detail: 'default: "BTYN"',
+		doc: "Where the two remotes live, as a `/`-separated path under `ReplicatedStorage`.\n\nPoints at an existing framework folder when the project would rather not carry a stray instance at the root.",
+	},
 	request_timeout: { detail: "default: 10", doc: "Seconds before an unanswered request fails." },
 	write_checks: {
 		detail: "default: true",

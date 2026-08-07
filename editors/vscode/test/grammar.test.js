@@ -38,6 +38,13 @@ async function createRegistry() {
 	})
 }
 
+/** The config keys the compiler accepts, read straight out of cli/Analyze.luau. */
+function compilerConfigKeys() {
+	const source = fs.readFileSync(path.join(ROOT, "..", "..", "cli", "Analyze.luau"), "utf8")
+	const block = source.slice(source.indexOf("local CONFIG_KEYS"), source.indexOf("local DEFAULT_RUNTIME"))
+	return [...block.matchAll(/"(\w+)"/g)].map((match) => match[1])
+}
+
 /** Tokenises source, returning [{ text, scopes }] with whitespace dropped. */
 function tokenise(grammar, source) {
 	const out = []
@@ -164,6 +171,15 @@ async function main() {
 	check(grammar, "numeric value", "config { budget = 40000 }", "40000", "constant.numeric")
 	// A typo'd key is flagged rather than silently looking correct.
 	check(grammar, "unknown key is flagged", 'config { serverr = "a.luau" }', "serverr", "invalid")
+
+	// The grammar spells its keys out in one regex, so a key added to the
+	// compiler and not here reads as a typo — flagged invalid in every schema
+	// that uses it. Only the example schema is tokenised elsewhere, and it
+	// cannot be expected to exercise every key, so check them from the list.
+	console.log("\n  Every config key highlights")
+	for (const key of compilerConfigKeys()) {
+		check(grammar, `config key '${key}'`, `config { ${key} = "x" }`, key, "support.type.property-name")
+	}
 
 	console.log("\n  Comments")
 	// The `--` marker tokenises apart from the body, so the body is checked.
