@@ -107,6 +107,10 @@ const CONFIG_KEYS = {
 		detail: 'default: game:GetService("ReplicatedStorage"):WaitForChild("BTYN")',
 		doc: "Luau expression the generated files use to reach the BTYN runtime.",
 	},
+	remotes: {
+		detail: "default: BTYN",
+		doc: "Where the two remotes live, as a `/`-separated path under `ReplicatedStorage`.\n\nPoints at an existing framework folder when the project would rather not carry a stray instance at the root.",
+	},
 	budget: { detail: "default: 40000", doc: "Soft per-client outbound budget in bytes per second." },
 	unreliable_cap: {
 		detail: "default: 800",
